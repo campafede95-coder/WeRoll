@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/images/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#f8f3ea"
     },
     "ios": {
       "supportsTablet": false
@@ -28,7 +28,15 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pic Sync Collective accede alle tue foto per aggiungerle alle esperienze condivise.",
+          "cameraPermission": "Pic Sync Collective usa la fotocamera per fermare i vostri momenti."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
