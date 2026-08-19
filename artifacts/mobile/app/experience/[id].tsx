@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -51,8 +51,55 @@ export default function GroupSessionScreen() {
   const updateReminder = useUpdateReminder();
   const [editing, setEditing] = useState<EditingReminder>(null);
   const [testNotificationState, setTestNotificationState] = useState<TestNotificationState>('idle');
+  const schedulingExperiences = useRef(new Set<string>());
   const group = query.data;
   const nextReminder = useMemo(() => group?.reminders.find((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now()), [group?.reminders]);
+
+  useEffect(() => {
+    if (!group || group.sessionStatus !== 'active' || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
+    if (schedulingExperiences.current.has(group.id)) return;
+    schedulingExperiences.current.add(group.id);
+
+    const scheduleReminders = async () => {
+      try {
+        const currentPermission = await Notifications.getPermissionsAsync();
+        const permission = currentPermission.granted ? currentPermission : await Notifications.requestPermissionsAsync();
+        if (!permission.granted) return;
+        await ensurePhotoReminderChannel();
+
+        const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+        const scheduledReminderIds = new Set(
+          scheduled
+            .filter((notification) => notification.content.data?.experienceId === group.id)
+            .map((notification) => notification.content.data?.reminderId)
+            .filter((reminderId): reminderId is string => typeof reminderId === 'string'),
+        );
+        const pendingReminders = group.reminders.filter((reminder) =>
+          new Date(reminder.scheduledAt).getTime() > Date.now() && !scheduledReminderIds.has(reminder.id),
+        );
+
+        await Promise.all(pendingReminders.map((reminder) => Notifications.scheduleNotificationAsync({
+          content: {
+            title: reminder.title,
+            body: 'Hai 15 minuti per scattare questo ricordo.',
+            sound: PHOTO_REMINDER_SOUND,
+            data: { experienceId: group.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt },
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: new Date(reminder.scheduledAt),
+            channelId: PHOTO_REMINDER_CHANNEL,
+          },
+        })));
+      } catch (error) {
+        console.warn('Non è stato possibile programmare le sveglie del gruppo.', error);
+      } finally {
+        schedulingExperiences.current.delete(group.id);
+      }
+    };
+
+    void scheduleReminders();
+  }, [group?.id, group?.sessionStatus, group?.reminders]);
 
   useEffect(() => {
     if (testNotificationState !== 'scheduled') return;
@@ -103,6 +150,11 @@ export default function GroupSessionScreen() {
   const startSession = () => { if (id) start.mutate({ experienceId: id }, { onSuccess: refresh }); };
   const closeSession = () => {
     if (!id) return;
+    void Notifications.getAllScheduledNotificationsAsync().then((scheduled) => Promise.all(
+      scheduled
+        .filter((notification) => notification.content.data?.experienceId === id)
+        .map((notification) => Notifications.cancelScheduledNotificationAsync(notification.identifier)),
+    ));
     close.mutate({ experienceId: id }, { onSuccess: refresh });
   };
   const saveReminder = () => {
