@@ -3,7 +3,7 @@ import * as Notifications from 'expo-notifications';
 import { getGetExperienceQueryKey, useGetExperience } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 
@@ -28,6 +28,7 @@ export default function PhotoMomentScreen() {
   const queryExperienceId = Array.isArray(experienceIdParam) ? experienceIdParam[0] : experienceIdParam;
   const experienceId = [queryExperienceId, routeExperienceId].find((value): value is string => typeof value === 'string' && EXPERIENCE_ID_PATTERN.test(value.trim()))?.trim() ?? '';
   const experience = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId) && !isTest } }).data;
+  const captureExperienceId = experience?.id ?? experienceId;
   const reminder = useMemo(() => experience?.reminders.find((item) => item.id === reminderId), [experience?.reminders, reminderId]);
   const startTime = useMemo(() => {
     const value = scheduledAt || reminder?.scheduledAt;
@@ -62,6 +63,23 @@ export default function PhotoMomentScreen() {
       },
     });
   };
+  const openCapture = () => {
+    if (!captureExperienceId) {
+      Alert.alert('Countdown non disponibile', 'Torna alla sessione attiva e riapri il countdown.');
+      return;
+    }
+    router.push({
+      pathname: '/capture/[id]',
+      params: {
+        id: captureExperienceId,
+        experienceId: captureExperienceId,
+        autoCamera: 'true',
+        ...(isTest ? { test: 'true' } : {}),
+        ...(reminderId ? { reminderId } : {}),
+        ...(scheduledAt ? { scheduledAt } : {}),
+      },
+    });
+  };
 
   return (
     <View style={[styles.page, { backgroundColor: colors.background, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
@@ -93,17 +111,7 @@ export default function PhotoMomentScreen() {
           accessibilityLabel={isTest ? 'Scatta foto di prova senza salvare' : 'Scatta foto'}
           testID="photo-window-capture"
           disabled={expired}
-          onPress={() => router.push({
-            pathname: '/capture/[id]',
-            params: {
-              id: experienceId,
-              experienceId,
-              autoCamera: 'true',
-              ...(isTest ? { test: 'true' } : {}),
-              ...(reminderId ? { reminderId } : {}),
-              ...(scheduledAt ? { scheduledAt } : {}),
-            },
-          })}
+          onPress={openCapture}
           style={({ pressed }) => [styles.primaryAction, { backgroundColor: expired ? colors.muted : colors.primary }, pressed && !expired && styles.pressed]}
         >
           <Feather name="camera" size={23} color={expired ? colors.mutedForeground : colors.primaryForeground} />
