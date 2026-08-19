@@ -297,7 +297,15 @@ export default function GroupSessionScreen() {
             </Pressable>
           ) : null}
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Quando suona una sveglia hai 15 minuti per scattare. Puoi catturare un ricordo anche in qualsiasi altro momento.</Text>
-          <PrimaryButton label="Scatto libero" icon="camera" onPress={() => router.push(`/capture/${id}` as never)} style={{ marginTop: 24 }} />
+          <PrimaryButton
+            label="Scatto libero"
+            icon="camera"
+            onPress={() => router.push({
+              pathname: '/capture/[id]',
+              params: { id: group.id, autoCamera: 'true' },
+            })}
+            style={{ marginTop: 24 }}
+          />
           <Surface style={styles.albumPreview}><Feather name="image" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.personName, { color: colors.foreground }]}>Album condiviso</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{group.memories.length} ricordi raccolti finora</Text></View></Surface>
           {group.isOwner ? <Pressable accessibilityRole="button" accessibilityLabel="Chiudi sessione" onPress={closeSession} style={styles.closeSession}><Text style={[styles.closeText, { color: colors.destructive }]}>Chiudi sessione</Text></Pressable> : null}
         </>

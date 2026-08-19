@@ -91,7 +91,7 @@ export default function PhotoMomentScreen() {
           onPress={() => router.push({
             pathname: '/capture/[id]',
             params: {
-              id,
+              id: experience?.id ?? id,
               autoCamera: 'true',
               ...(isTest ? { test: 'true' } : {}),
               ...(reminderId ? { reminderId } : {}),
