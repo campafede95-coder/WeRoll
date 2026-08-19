@@ -49,11 +49,7 @@ export default function PhotoMomentScreen() {
         // The notification may already be dismissed by the operating system.
       }
     }
-    if (source === 'session' && router.canGoBack()) {
-      router.back();
-      return;
-    }
-    router.replace({
+    router.dismissTo({
       pathname: '/experience/[id]',
       params: {
         id: experience?.id ?? id,
