@@ -234,6 +234,15 @@ importers:
       expo-clipboard:
         specifier: ~8.0.8
         version: 8.0.8(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      expo-file-system:
+        specifier: ~19.0.24
+        version: 19.0.24(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))
+      expo-sharing:
+        specifier: ~14.0.8
+        version: 14.0.8(expo@54.0.37)
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
     devDependencies:
       '@babel/core':
         specifier: ^7.25.2
@@ -4218,6 +4227,11 @@ packages:
     resolution: {integrity: sha512-mcmyML3oXcqFUXUxtdtCL1O00ztNI2v76d+MdniXRUgHNxIcHZ05zo+DqBaOOT6LQnPk4vA4YHqQl7iGUfRb3g==}
     engines: {node: '>=20.16.0'}
 
+  expo-sharing@14.0.8:
+    resolution: {integrity: sha512-A1pPr2iBrxypFDCWVAESk532HK+db7MFXbvO2sCV9ienaFXAk7lIBm6bkqgE6vzRd9O3RGdEGzYx80cYlc089Q==}
+    peerDependencies:
+      expo: '*'
+
   expo-splash-screen@31.0.13:
     resolution: {integrity: sha512-1epJLC1cDlwwj089R2h8cxaU5uk4ONVAC+vzGiTZH4YARQhL4Stlz1MbR6yAS173GMosvkE6CAeihR7oIbCkDA==}
     peerDependencies:
@@ -4325,6 +4339,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   figures@6.1.0:
     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
@@ -11197,6 +11214,10 @@ snapshots:
 
   expo-server@1.0.7: {}
 
+  expo-sharing@14.0.8(expo@54.0.37):
+    dependencies:
+      expo: 54.0.37(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(expo-router@6.0.24)(react-native@0.81.5(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)
+
   expo-splash-screen@31.0.13(expo@54.0.37)(typescript@5.9.3):
     dependencies:
       '@expo/prebuild-config': 54.0.9(expo@54.0.37)(typescript@5.9.3)
@@ -11353,6 +11374,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.5):
     optionalDependencies:
       picomatch: 4.0.5
+
+  fflate@0.8.3: {}
 
   figures@6.1.0:
     dependencies:

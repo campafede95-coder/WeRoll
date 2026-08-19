@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Sharing from 'expo-sharing';
+import { File, Paths } from 'expo-file-system';
+import { zipSync } from 'fflate';
 import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useRegisterPushToken, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Alert, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 import { ensurePhotoReminderChannel, PHOTO_REMINDER_CHANNEL, PHOTO_REMINDER_SOUND } from '@/constants/notifications';
@@ -46,8 +49,59 @@ function toMinutes(time?: string | null) {
 
 type EditingReminder = { id: string; hour: number; minute: number } | null;
 type TestNotificationState = 'idle' | 'scheduled';
+type AlbumMemory = { id: string; imageUri: string; authorName: string; capturedAt: string };
 
 const TEST_NOTIFICATION_DELAY_SECONDS = 5;
+const BASE64_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function sanitizeFilePart(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'foto';
+}
+
+function decodeBase64(base64: string) {
+  const source = base64.replace(/[\r\n\s]/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  const padding = source.endsWith('==') ? 2 : source.endsWith('=') ? 1 : 0;
+  const bytes = new Uint8Array(Math.floor((source.length * 3) / 4) - padding);
+  let buffer = 0;
+  let bits = 0;
+  let offset = 0;
+
+  for (const character of source) {
+    if (character === '=') break;
+    const value = BASE64_CHARACTERS.indexOf(character);
+    if (value < 0) throw new Error('Immagine in un formato non supportato.');
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes[offset] = (buffer >> bits) & 0xff;
+      offset += 1;
+      buffer &= (1 << bits) - 1;
+    }
+  }
+  return bytes;
+}
+
+async function imageFileForArchive(memory: AlbumMemory, index: number) {
+  const dataUri = /^data:image\/([a-z0-9.+-]+);base64,(.+)$/i.exec(memory.imageUri);
+  let bytes: Uint8Array;
+  let extension = 'jpg';
+
+  if (dataUri) {
+    const subtype = dataUri[1].toLowerCase();
+    extension = subtype === 'jpeg' ? 'jpg' : subtype === 'svg+xml' ? 'svg' : subtype;
+    bytes = decodeBase64(dataUri[2]);
+  } else {
+    const response = await fetch(memory.imageUri);
+    if (!response.ok) throw new Error('Una foto non è più disponibile.');
+    bytes = new Uint8Array(await response.arrayBuffer());
+    const contentType = response.headers.get('content-type')?.split(';')[0].replace('image/', '');
+    extension = contentType === 'jpeg' ? 'jpg' : contentType || extension;
+  }
+
+  const author = sanitizeFilePart(memory.authorName);
+  return [`${String(index + 1).padStart(2, '0')}-${author}-${memory.id.slice(-6)}.${extension}`, bytes] as const;
+}
 
 export default function GroupSessionScreen() {
   const colors = useColors();
@@ -62,6 +116,7 @@ export default function GroupSessionScreen() {
   const registerPushToken = useRegisterPushToken();
   const [editing, setEditing] = useState<EditingReminder>(null);
   const [testNotificationState, setTestNotificationState] = useState<TestNotificationState>('idle');
+  const [isExportingAlbum, setIsExportingAlbum] = useState(false);
   const [now, setNow] = useState(Date.now());
   const schedulingExperiences = useRef(new Set<string>());
   const group = query.data;
@@ -222,12 +277,43 @@ export default function GroupSessionScreen() {
       data: { title: reminder.title, message: reminder.message, scheduledAt: dateAtGroupTime(reminder.scheduledAt, editing.hour, editing.minute, group.timeZone).toISOString() },
     }, { onSuccess: () => { setEditing(null); refresh(); } });
   };
+  const exportAlbum = async () => {
+    if (!group?.memories.length || isExportingAlbum) return;
+    if (Platform.OS === 'web') {
+      Alert.alert('Disponibile sul telefono', 'Apri l’album finale su iPhone o Android per salvare il file ZIP.');
+      return;
+    }
+
+    setIsExportingAlbum(true);
+    try {
+      const imageFiles = await Promise.all(group.memories.map(imageFileForArchive));
+      const archive = zipSync(Object.fromEntries(imageFiles), { level: 0 });
+      const archiveFile = new File(Paths.cache, `album-${sanitizeFilePart(group.name)}.zip`);
+      archiveFile.write(archive);
+
+      if (!await Sharing.isAvailableAsync()) {
+        Alert.alert('Condivisione non disponibile', 'Questo telefono non può aprire la finestra per salvare il file ZIP.');
+        return;
+      }
+
+      await Sharing.shareAsync(archiveFile.uri, {
+        mimeType: 'application/zip',
+        dialogTitle: `Salva l’album ${group.name}`,
+        UTI: 'public.zip-archive',
+      });
+    } catch (error) {
+      console.warn('Esportazione album fallita.', error);
+      Alert.alert('ZIP non creato', 'Non siamo riusciti a preparare tutte le foto. Riprova tra un momento.');
+    } finally {
+      setIsExportingAlbum(false);
+    }
+  };
 
   if (query.isLoading) return <Screen><AppHeader title="Gruppo" back /><SkeletonList /></Screen>;
   if (query.isError || !group) return <Screen><AppHeader title="Gruppo" back /><ErrorState onRetry={() => void query.refetch()} /></Screen>;
 
   if (group.sessionStatus === 'closed') {
-    return <Screen><AppHeader title="Album finale" back /><Text style={[styles.eyebrow, { color: colors.primary }]}>SESSIONE CONCLUSA</Text><Text style={[styles.title, { color: colors.foreground }]}>Tutti i vostri{'\n'}ricordi insieme.</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{group.memories.length} foto raccolte durante l&apos;avventura.</Text>{group.memories.length ? <View style={styles.album}>{group.memories.map((memory) => <View key={memory.id} style={styles.memory}><Image source={{ uri: memory.imageUri }} contentFit="cover" style={styles.memoryImage} /><Text numberOfLines={1} style={[styles.memoryAuthor, { color: colors.foreground }]}>{memory.authorName}</Text></View>)}</View> : <EmptyState icon="image" title="Nessuna foto ancora" body="Le foto scattate verranno raccolte qui." />}<PrimaryButton label="Condividi l'album" icon="share-2" onPress={() => void Share.share({ message: `Album Pic Sync · ${group.name} · ${group.memories.length} ricordi raccolti.` })} style={{ marginTop: 22 }} /></Screen>;
+    return <Screen><AppHeader title="Album finale" back /><Text style={[styles.eyebrow, { color: colors.primary }]}>SESSIONE CONCLUSA</Text><Text style={[styles.title, { color: colors.foreground }]}>Tutti i vostri{'\n'}ricordi insieme.</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{group.memories.length} foto raccolte durante l&apos;avventura.</Text>{group.memories.length ? <View style={styles.album}>{group.memories.map((memory) => <View key={memory.id} style={styles.memory}><Image source={{ uri: memory.imageUri }} contentFit="cover" style={styles.memoryImage} /><Text numberOfLines={1} style={[styles.memoryAuthor, { color: colors.foreground }]}>{memory.authorName}</Text></View>)}</View> : <EmptyState icon="image" title="Nessuna foto ancora" body="Le foto scattate verranno raccolte qui." />}{group.memories.length ? <><PrimaryButton label="Scarica album ZIP" icon="download" onPress={() => void exportAlbum()} loading={isExportingAlbum} style={{ marginTop: 22 }} /><Text style={[styles.zipHint, { color: colors.mutedForeground }]}>Scegli “Salva su File” per conservare tutte le foto in un unico ZIP.</Text></> : null}</Screen>;
   }
 
   const hours = Array.from({ length: Math.floor(toMinutes(group.windowEnd) / 60) - Math.floor(toMinutes(group.windowStart) / 60) + 1 }, (_, index) => Math.floor(toMinutes(group.windowStart) / 60) + index);
@@ -338,6 +424,6 @@ const styles = StyleSheet.create({
   waitNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 4 }, waitEmoji: { fontSize: 16 }, waitText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
   momentBanner: { marginTop: 20, minHeight: 70, borderRadius: 19, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, momentIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, momentCopy: { flex: 1 }, momentKicker: { fontFamily: 'Inter_700Bold', fontSize: 9, letterSpacing: 1.2 }, momentTitle: { fontFamily: 'Inter_500Medium', fontSize: 13, marginTop: 3 }, momentCountdown: { fontFamily: 'Inter_700Bold', fontSize: 18, fontVariant: ['tabular-nums'] }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
   testCard: { marginTop: 16, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11 }, testIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, testCopy: { flex: 1 }, testTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 }, testBody: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16, marginTop: 3 }, testButton: { minWidth: 62, minHeight: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8 }, testButtonLabel: { fontFamily: 'Inter_700Bold', fontSize: 10 }, pressed: { opacity: 0.8, transform: [{ scale: 0.96 }] },
-  eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 },
+  eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 }, zipHint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 10, paddingHorizontal: 14 },
   modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
 });
