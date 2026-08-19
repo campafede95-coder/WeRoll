@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: experiences
+    description: Shared experiences and memories
 paths:
   /healthz:
     get:
@@ -24,7 +26,134 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /experiences:
+    get:
+      operationId: listExperiences
+      tags: [experiences]
+      summary: List the signed-in user's experiences
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Experiences
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Experience" }
+    post:
+      operationId: createExperience
+      tags: [experiences]
+      summary: Create an experience
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExperienceRequest" }
+      responses:
+        "201":
+          description: Created experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experience" }
+  /experiences/join:
+    post:
+      operationId: joinExperience
+      tags: [experiences]
+      summary: Join an experience using an invite code
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JoinExperienceRequest" }
+      responses:
+        "200":
+          description: Joined experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experience" }
+  /experiences/{experienceId}:
+    get:
+      operationId: getExperience
+      tags: [experiences]
+      summary: Get an experience with reminders and memories
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Experience details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExperienceDetail" }
+    patch:
+      operationId: updateExperience
+      tags: [experiences]
+      summary: Update an owned experience
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExperienceRequest" }
+      responses:
+        "200":
+          description: Updated experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experience" }
+  /experiences/{experienceId}/reminders:
+    post:
+      operationId: createReminder
+      tags: [experiences]
+      summary: Schedule a photo reminder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReminderRequest" }
+      responses:
+        "201":
+          description: Created reminder
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reminder" }
+  /experiences/{experienceId}/memories:
+    post:
+      operationId: createMemory
+      tags: [experiences]
+      summary: Add a photo memory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateMemoryRequest" }
+      responses:
+        "201":
+          description: Created memory
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ExperienceId:
+      name: experienceId
+      in: path
+      required: true
+      schema: { type: string }
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +162,86 @@ components:
           type: string
       required:
         - status
+    Experience:
+      type: object
+      required: [id, name, startDate, endDate, status, participantCount, inviteCode]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        coverImageUri: { type: string, nullable: true }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        status: { type: string, enum: [upcoming, ongoing, completed] }
+        participantCount: { type: integer }
+        inviteCode: { type: string }
+    ExperienceDetail:
+      allOf:
+        - $ref: "#/components/schemas/Experience"
+        - type: object
+          required: [participants, reminders, memories]
+          properties:
+            participants:
+              type: array
+              items: { $ref: "#/components/schemas/Participant" }
+            reminders:
+              type: array
+              items: { $ref: "#/components/schemas/Reminder" }
+            memories:
+              type: array
+              items: { $ref: "#/components/schemas/Memory" }
+    Participant:
+      type: object
+      required: [id, displayName]
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string, nullable: true }
+    Reminder:
+      type: object
+      required: [id, title, scheduledAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        message: { type: string, nullable: true }
+        scheduledAt: { type: string, format: date-time }
+    Memory:
+      type: object
+      required: [id, imageUri, authorName, capturedAt]
+      properties:
+        id: { type: string }
+        imageUri: { type: string }
+        authorName: { type: string }
+        capturedAt: { type: string, format: date-time }
+        reminderTitle: { type: string, nullable: true }
+    CreateExperienceRequest:
+      type: object
+      required: [name, startDate, endDate]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        coverImageUri: { type: string, nullable: true }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+    JoinExperienceRequest:
+      type: object
+      required: [inviteCode]
+      properties:
+        inviteCode: { type: string, minLength: 4 }
+    CreateReminderRequest:
+      type: object
+      required: [title, scheduledAt]
+      properties:
+        title: { type: string, minLength: 1 }
+        message: { type: string, nullable: true }
+        scheduledAt: { type: string, format: date-time }
+    CreateMemoryRequest:
+      type: object
+      required: [imageUri, capturedAt]
+      properties:
+        imageUri: { type: string, minLength: 1 }
+        capturedAt: { type: string, format: date-time }
+        reminderId: { type: string, nullable: true }
 
