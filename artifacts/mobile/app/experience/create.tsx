@@ -58,7 +58,7 @@ export default function CreateGroupScreen() {
     }, {
       onSuccess: (group) => {
         setCreated({ id: group.id, inviteCode: group.inviteCode });
-         setStep(4);
+        setStep(4);
       },
       onError: () => Alert.alert('Non riusciamo a creare il gruppo', 'Riprova tra un momento.'),
     });
@@ -103,37 +103,37 @@ export default function CreateGroupScreen() {
       ) : (
         <>
           <View style={styles.intro}><View style={[styles.introIcon, { backgroundColor: colors.secondary }]}><Feather name="clock" size={22} color={colors.primary} /></View><Text style={[styles.heading, { color: colors.foreground }]}>Fascia oraria{'\n'}dell&apos;avventura</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Le sveglie verranno distribuite in modo equilibrato in questo intervallo. Potrai cambiarle nella lobby.</Text></View>
-           <View style={styles.timeStack}>
-             {([{ field: 'start' as const, label: 'INIZIO', value: windowStart }, { field: 'end' as const, label: 'FINE', value: windowEnd }]).map(({ field, label, value }) => (
-               <Pressable key={field} accessibilityRole="button" accessibilityLabel={`Scegli orario di ${label.toLowerCase()}`} onPress={() => { const current = timeParts(value); setTimePicker({ field, ...current }); }} style={({ pressed }) => [styles.timeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>
-                 <Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>{label}</Text>
-                 <Text style={[styles.timeValue, { color: colors.foreground }]}>{value}</Text>
-                 <Feather name="chevron-down" size={22} color={colors.foreground} />
-               </Pressable>
-             ))}
-           </View>
+          <View style={styles.timeStack}>
+            {([{ field: 'start' as const, label: 'INIZIO', value: windowStart }, { field: 'end' as const, label: 'FINE', value: windowEnd }]).map(({ field, label, value }) => (
+              <Pressable key={field} accessibilityRole="button" accessibilityLabel={`Scegli orario di ${label.toLowerCase()}`} testID={field === 'start' ? 'start-time-picker' : 'end-time-picker'} onPress={() => { const current = timeParts(value); setTimePicker({ field, ...current }); }} style={({ pressed }) => [styles.timeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>
+                <Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>{label}</Text>
+                <Text style={[styles.timeValue, { color: colors.foreground }]}>{value}</Text>
+                <Feather name="chevron-down" size={22} color={colors.foreground} />
+              </Pressable>
+            ))}
+          </View>
           <PrimaryButton label="Crea gruppo" icon="arrow-right" onPress={() => void submit()} loading={createGroup.isPending} style={styles.actionButton} />
         </>
       )}
-       <Modal visible={Boolean(timePicker)} transparent animationType="fade" onRequestClose={() => setTimePicker(null)}>
-         <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}>
-           <View style={[styles.pickerSheet, { backgroundColor: colors.background }]}>
-             <Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text>
-             <Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>{timePicker?.field === 'start' ? 'Inizio della fascia' : 'Fine della fascia'}</Text>
-             <View style={[styles.picker, { borderColor: colors.border }]}>
-               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>
-                 {Array.from({ length: 24 }, (_, hour) => <Pressable key={hour} onPress={() => setTimePicker((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, timePicker?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: timePicker?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}
-               </ScrollView>
-               <Text style={[styles.colon, { color: colors.foreground }]}>:</Text>
-               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>
-                 {Array.from({ length: 60 }, (_, minute) => <Pressable key={minute} onPress={() => setTimePicker((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, timePicker?.minute === minute && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: timePicker?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}
-               </ScrollView>
-             </View>
-             <PrimaryButton label="Conferma orario" icon="check" onPress={() => { if (!timePicker) return; const value = formatTime(timePicker.hour, timePicker.minute); if (timePicker.field === 'start') setWindowStart(value); else setWindowEnd(value); setTimePicker(null); }} />
-             <Pressable onPress={() => setTimePicker(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable>
-           </View>
-         </View>
-       </Modal>
+      <Modal visible={Boolean(timePicker)} transparent animationType="fade" onRequestClose={() => setTimePicker(null)}>
+        <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}>
+          <View style={[styles.pickerSheet, { backgroundColor: colors.background }]}>
+            <Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text>
+            <Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>{timePicker?.field === 'start' ? 'Inizio della fascia' : 'Fine della fascia'}</Text>
+            <View style={[styles.picker, { borderColor: colors.border }]}>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>
+                {Array.from({ length: 24 }, (_, hour) => <Pressable key={hour} accessibilityRole="button" accessibilityLabel={`Ora ${String(hour).padStart(2, '0')}`} testID={`time-hour-${String(hour).padStart(2, '0')}`} onPress={() => setTimePicker((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, timePicker?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: timePicker?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}
+              </ScrollView>
+              <Text style={[styles.colon, { color: colors.foreground }]}>:</Text>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>
+                {Array.from({ length: 60 }, (_, minute) => <Pressable key={minute} accessibilityRole="button" accessibilityLabel={`Minuti ${String(minute).padStart(2, '0')}`} testID={`time-minute-${String(minute).padStart(2, '0')}`} onPress={() => setTimePicker((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, timePicker?.minute === minute && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: timePicker?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}
+              </ScrollView>
+            </View>
+            <PrimaryButton label="Conferma orario" icon="check" onPress={() => { if (!timePicker) return; const value = formatTime(timePicker.hour, timePicker.minute); if (timePicker.field === 'start') setWindowStart(value); else setWindowEnd(value); setTimePicker(null); }} />
+            <Pressable accessibilityRole="button" accessibilityLabel="Chiudi selettore orario" onPress={() => setTimePicker(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAwareScrollViewCompat>
   );
 }

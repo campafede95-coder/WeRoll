@@ -23,7 +23,13 @@ export default function CaptureScreen() {
   const capture = async () => {
     if (!permission?.granted) {
       const result = await requestPermission();
-      if (!result.granted && !result.canAskAgain) Alert.alert('Fotocamera non disponibile', 'Abilita l’accesso alla fotocamera dalle impostazioni.', [{ text: 'Apri impostazioni', onPress: () => void Linking.openSettings() }, { text: 'Annulla', style: 'cancel' }]);
+      if (!result.granted) {
+        Alert.alert(
+          result.canAskAgain ? 'Fotocamera non abilitata' : 'Fotocamera non disponibile',
+          'Abilita l’accesso alla fotocamera dalle impostazioni per effettuare lo scatto di prova.',
+          [{ text: 'Apri impostazioni', onPress: () => void Linking.openSettings() }, { text: 'Annulla', style: 'cancel' }],
+        );
+      }
       return;
     }
     const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.35, allowsEditing: false, base64: true });

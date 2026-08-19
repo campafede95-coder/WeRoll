@@ -18,6 +18,7 @@ import * as Notifications from 'expo-notifications';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import { setBaseUrl, setGuestIdentityGetter } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
+import { ensurePhotoReminderChannel } from '@/constants/notifications';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -25,7 +26,6 @@ const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
 
 const queryClient = new QueryClient();
-const PHOTO_REMINDER_CHANNEL = 'pic-sync-reminders-v2';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
@@ -97,16 +97,7 @@ export default function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
-    if (Platform.OS === 'android') {
-      void Notifications.setNotificationChannelAsync(PHOTO_REMINDER_CHANNEL, {
-        name: 'Promemoria foto',
-        description: 'Sveglie brevi per i momenti fotografici del gruppo',
-        importance: Notifications.AndroidImportance.HIGH,
-        sound: 'photo-reminder.mp3',
-        enableVibrate: true,
-        vibrationPattern: [0, 250, 140, 250],
-      });
-    }
+    void ensurePhotoReminderChannel();
   }, []);
 
   useEffect(() => {

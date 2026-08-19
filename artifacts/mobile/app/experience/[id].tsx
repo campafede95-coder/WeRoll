@@ -8,6 +8,7 @@ import { Image } from 'expo-image';
 import { Alert, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
+import { ensurePhotoReminderChannel, PHOTO_REMINDER_CHANNEL, PHOTO_REMINDER_SOUND } from '@/constants/notifications';
 
 function partsFor(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
@@ -70,31 +71,28 @@ export default function GroupSessionScreen() {
     const current = await Notifications.getPermissionsAsync();
     const permission = current.granted ? current : await Notifications.requestPermissionsAsync();
     if (!permission.granted) {
-      if (!permission.canAskAgain) {
-        Alert.alert(
-          'Avvisi disattivati',
-          'Per provare suono e vibrazione, abilita le notifiche di Pic Sync dalle impostazioni del telefono.',
-          [{ text: 'Apri impostazioni', onPress: () => void Linking.openSettings() }, { text: 'Annulla', style: 'cancel' }],
-        );
-      } else {
-        Alert.alert('Avvisi non abilitati', 'Consenti le notifiche per ricevere la sveglia di prova.');
-      }
+      Alert.alert(
+        permission.canAskAgain ? 'Avvisi non abilitati' : 'Avvisi disattivati',
+        'Per provare suono e vibrazione, abilita le notifiche di Pic Sync dalle impostazioni del telefono.',
+        [{ text: 'Apri impostazioni', onPress: () => void Linking.openSettings() }, { text: 'Annulla', style: 'cancel' }],
+      );
       return;
     }
 
     const scheduledAt = new Date(Date.now() + TEST_NOTIFICATION_DELAY_SECONDS * 1000).toISOString();
     try {
+      await ensurePhotoReminderChannel();
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Prova avviso',
           body: 'Suono e vibrazione · tocca per aprire il countdown di prova.',
-          sound: 'default',
+          sound: PHOTO_REMINDER_SOUND,
           data: { experienceId: group.id, scheduledAt, test: true },
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: new Date(scheduledAt),
-          channelId: 'pic-sync-reminders-v2',
+          channelId: PHOTO_REMINDER_CHANNEL,
         },
       });
       setTestNotificationState('scheduled');
