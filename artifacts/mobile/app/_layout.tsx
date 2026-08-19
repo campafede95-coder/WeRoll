@@ -35,12 +35,15 @@ function openPhotoMoment(notification: Notifications.Notification) {
   const data = notification.request.content.data;
   const experienceId = data?.experienceId;
   if (typeof experienceId !== 'string') return false;
+  const isTest = data?.test === true || data?.test === 'true';
   router.push({
     pathname: '/moment/[id]',
     params: {
       id: experienceId,
       reminderId: typeof data.reminderId === 'string' ? data.reminderId : '',
       scheduledAt: typeof data.scheduledAt === 'string' ? data.scheduledAt : new Date(notification.date).toISOString(),
+      test: isTest ? 'true' : '',
+      notificationId: notification.request.identifier,
     },
   });
   return true;
