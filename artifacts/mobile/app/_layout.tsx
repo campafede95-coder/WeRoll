@@ -1,4 +1,4 @@
-import React, { PropsWithChildren, useEffect, useState } from 'react';
+import React, { PropsWithChildren, useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -11,11 +11,11 @@ import {
   Inter_700Bold,
   useFonts,
 } from '@expo-google-fonts/inter';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useRootNavigationState } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
 import { setBaseUrl, setGuestIdentityGetter } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 
@@ -25,6 +25,27 @@ const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
 
 const queryClient = new QueryClient();
+const PHOTO_REMINDER_CHANNEL = 'pic-sync-reminders';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+});
+
+function openPhotoMoment(notification: Notifications.Notification) {
+  const data = notification.request.content.data;
+  const experienceId = data?.experienceId;
+  if (typeof experienceId !== 'string') return false;
+  router.push({
+    pathname: '/moment/[id]',
+    params: {
+      id: experienceId,
+      reminderId: typeof data.reminderId === 'string' ? data.reminderId : '',
+      scheduledAt: typeof data.scheduledAt === 'string' ? data.scheduledAt : new Date(notification.date).toISOString(),
+    },
+  });
+  return true;
+}
+
 function GuestIdentityBootstrap({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false);
   const colors = useColors();
@@ -50,12 +71,15 @@ function RootLayoutNav() {
       <Stack.Screen name="join" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/create" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/[id]" />
+      <Stack.Screen name="moment/[id]" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
       <Stack.Screen name="capture/[id]" />
     </Stack>
   );
 }
 
 export default function RootLayout() {
+  const rootNavigationState = useRootNavigationState();
+  const handledNotificationIds = useRef<Set<string>>(new Set());
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -70,12 +94,38 @@ export default function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const experienceId = response.notification.request.content.data?.experienceId;
-      if (typeof experienceId === 'string') router.push(`/capture/${experienceId}` as never);
-    });
-    return () => subscription.remove();
+    if (Platform.OS === 'android') {
+      void Notifications.setNotificationChannelAsync(PHOTO_REMINDER_CHANNEL, {
+        name: 'Promemoria foto',
+        description: 'Sveglie brevi per i momenti fotografici del gruppo',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+        enableVibrate: true,
+        vibrationPattern: [0, 250, 140, 250],
+      });
+    }
   }, []);
+
+  useEffect(() => {
+    if (!rootNavigationState?.key) return;
+    const handleNotification = (notification: Notifications.Notification) => {
+      const notificationId = notification.request.identifier;
+      if (handledNotificationIds.current.has(notificationId)) return;
+      if (openPhotoMoment(notification)) handledNotificationIds.current.add(notificationId);
+    };
+    const handleResponse = async (response: Notifications.NotificationResponse | null) => {
+      if (!response) return;
+      handleNotification(response.notification);
+      if (Platform.OS !== 'web') await Notifications.clearLastNotificationResponseAsync();
+    };
+    const receivedSubscription = Notifications.addNotificationReceivedListener(handleNotification);
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => void handleResponse(response));
+    if (Platform.OS !== 'web') void Notifications.getLastNotificationResponseAsync().then(handleResponse);
+    return () => {
+      receivedSubscription.remove();
+      responseSubscription.remove();
+    };
+  }, [rootNavigationState?.key]);
 
   if (!fontsLoaded && !fontError) return null;
 

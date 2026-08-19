@@ -10,10 +10,6 @@ import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'rea
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
-});
-
 function partsFor(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
   const get = (kind: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === kind)?.value);
@@ -63,8 +59,13 @@ export default function GroupSessionScreen() {
       const permission = await Notifications.getPermissionsAsync();
       if (!permission.granted) return;
       const identifiers = await Promise.all(group.reminders.filter((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now()).map((reminder) => Notifications.scheduleNotificationAsync({
-        content: { title: reminder.title, body: 'Hai 15 minuti per scattare questo ricordo.', sound: 'default', data: { experienceId: group.id } },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(reminder.scheduledAt) },
+        content: {
+          title: reminder.title,
+          body: 'Hai 15 minuti per scattare questo ricordo.',
+          sound: 'default',
+          data: { experienceId: group.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt },
+        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(reminder.scheduledAt), channelId: 'pic-sync-reminders' },
       })));
       await AsyncStorage.setItem(scheduledKey, JSON.stringify(identifiers));
     };
