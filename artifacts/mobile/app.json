@@ -29,7 +29,14 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/photo-reminder.mp3"
+          ]
+        }
+      ],
       [
         "expo-image-picker",
         {

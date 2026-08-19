@@ -41,6 +41,15 @@ export const remindersTable = pgTable("pic_sync_reminders", {
   title: text("title").notNull(),
   message: text("message"),
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+  notifiedAt: timestamp("notified_at", { withTimezone: true }),
+});
+
+export const pushTokensTable = pgTable("pic_sync_push_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  token: text("token").notNull().unique(),
+  platform: text("platform").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const memoriesTable = pgTable("pic_sync_memories", {

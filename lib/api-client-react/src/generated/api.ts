@@ -28,6 +28,7 @@ import type {
   HealthStatus,
   JoinExperienceRequest,
   Memory,
+  RegisterPushTokenRequest,
   Reminder
 } from './api.schemas';
 
@@ -790,6 +791,78 @@ export const useCloseExperience = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCloseExperienceMutationOptions(options));
+    }
+
+export const getRegisterPushTokenUrl = (experienceId: string,) => {
+
+
+
+
+  return `/api/experiences/${experienceId}/push-token`
+}
+
+/**
+ * @summary Register this device for group photo reminders
+ */
+export const registerPushToken = async (experienceId: string,
+    registerPushTokenRequest: RegisterPushTokenRequest, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getRegisterPushTokenUrl(experienceId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(registerPushTokenRequest)
+  }
+);}
+
+
+
+
+
+export const getRegisterPushTokenMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerPushToken>>, TError,{experienceId: string;data: BodyType<RegisterPushTokenRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof registerPushToken>>, TError,{experienceId: string;data: BodyType<RegisterPushTokenRequest>}, TContext> => {
+
+const mutationKey = ['registerPushToken'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof registerPushToken>>, {experienceId: string;data: BodyType<RegisterPushTokenRequest>}> = (props) => {
+          const {experienceId,data} = props ?? {};
+
+          return  registerPushToken(experienceId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegisterPushTokenMutationResult = NonNullable<Awaited<ReturnType<typeof registerPushToken>>>
+    export type RegisterPushTokenMutationBody = BodyType<RegisterPushTokenRequest>
+    export type RegisterPushTokenMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Register this device for group photo reminders
+ */
+export const useRegisterPushToken = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof registerPushToken>>, TError,{experienceId: string;data: BodyType<RegisterPushTokenRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof registerPushToken>>,
+        TError,
+        {experienceId: string;data: BodyType<RegisterPushTokenRequest>},
+        TContext
+      > => {
+      return useMutation(getRegisterPushTokenMutationOptions(options));
     }
 
 export const getCreateMemoryUrl = (experienceId: string,) => {

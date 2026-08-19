@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import * as Notifications from 'expo-notifications';
 import { getGetExperienceQueryKey, useGetExperience } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -39,11 +38,6 @@ export default function PhotoMomentScreen() {
     return () => clearInterval(timer);
   }, [expired]);
 
-  const dismiss = async () => {
-    await Notifications.dismissAllNotificationsAsync();
-    router.replace(`/experience/${id}` as never);
-  };
-
   return (
     <View style={[styles.page, { backgroundColor: colors.background, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
       <View style={styles.content}>
@@ -68,16 +62,7 @@ export default function PhotoMomentScreen() {
           <Feather name="camera" size={23} color={expired ? colors.mutedForeground : colors.primaryForeground} />
           <Text style={[styles.primaryLabel, { color: expired ? colors.mutedForeground : colors.primaryForeground }]}>Scatta foto</Text>
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={expired ? 'Torna alla sessione' : 'Silenzia'}
-          testID="photo-window-dismiss"
-          onPress={() => void dismiss()}
-          style={({ pressed }) => [styles.secondaryAction, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}
-        >
-          <Feather name={expired ? 'arrow-left' : 'bell-off'} size={22} color={colors.foreground} />
-          <Text style={[styles.secondaryLabel, { color: colors.foreground }]}>{expired ? 'Torna' : 'Silenzia'}</Text>
-        </Pressable>
+        {expired ? <Pressable accessibilityRole="button" accessibilityLabel="Torna alla sessione" onPress={() => router.replace(`/experience/${id}` as never)} style={({ pressed }) => [styles.returnAction, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}><Text style={[styles.returnLabel, { color: colors.foreground }]}>Torna alla sessione</Text></Pressable> : null}
       </View>
     </View>
   );
@@ -91,10 +76,10 @@ const styles = StyleSheet.create({
   subtitle: { fontFamily: 'Inter_400Regular', fontSize: 19, lineHeight: 26, textAlign: 'center', marginTop: 20 },
   countdown: { fontFamily: 'Inter_700Bold', fontSize: 60, lineHeight: 68, letterSpacing: -2.4, marginTop: 23, fontVariant: ['tabular-nums'] },
   reminderTitle: { fontFamily: 'Inter_500Medium', fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 12 },
-  actions: { flexDirection: 'row', gap: 12 },
-  primaryAction: { flex: 1.45, minHeight: 66, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
-  secondaryAction: { flex: 1, minHeight: 66, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
+  actions: { gap: 12 },
+  primaryAction: { minHeight: 66, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   primaryLabel: { fontFamily: 'Inter_700Bold', fontSize: 17 },
-  secondaryLabel: { fontFamily: 'Inter_700Bold', fontSize: 16 },
+  returnAction: { minHeight: 52, borderWidth: 1, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  returnLabel: { fontFamily: 'Inter_700Bold', fontSize: 15 },
   pressed: { opacity: 0.82, transform: [{ scale: 0.985 }] },
 });

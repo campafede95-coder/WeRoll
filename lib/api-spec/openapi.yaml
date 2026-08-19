@@ -175,6 +175,22 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExperienceDetail" }
+  /experiences/{experienceId}/push-token:
+    post:
+      operationId: registerPushToken
+      tags: [experiences]
+      summary: Register this device for group photo reminders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterPushTokenRequest" }
+      responses:
+        "204":
+          description: Push token registered
   /experiences/{experienceId}/memories:
     post:
       operationId: createMemory
@@ -307,4 +323,10 @@ components:
         imageUri: { type: string, minLength: 1 }
         capturedAt: { type: string, format: date-time }
         reminderId: { type: string, nullable: true }
+    RegisterPushTokenRequest:
+      type: object
+      required: [token, platform]
+      properties:
+        token: { type: string, minLength: 10, maxLength: 300 }
+        platform: { type: string, enum: [ios, android] }
 

@@ -17,4 +17,6 @@ export * from './healthStatus';
 export * from './joinExperienceRequest';
 export * from './memory';
 export * from './participant';
+export * from './registerPushTokenRequest';
+export * from './registerPushTokenRequestPlatform';
 export * from './reminder';

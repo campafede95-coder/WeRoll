@@ -25,7 +25,7 @@ const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
 
 const queryClient = new QueryClient();
-const PHOTO_REMINDER_CHANNEL = 'pic-sync-reminders';
+const PHOTO_REMINDER_CHANNEL = 'pic-sync-reminders-v2';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
@@ -71,7 +71,7 @@ function RootLayoutNav() {
       <Stack.Screen name="join" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/create" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/[id]" />
-      <Stack.Screen name="moment/[id]" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
+      <Stack.Screen name="moment/[id]" options={{ presentation: 'fullScreenModal', gestureEnabled: true }} />
       <Stack.Screen name="capture/[id]" />
     </Stack>
   );
@@ -99,7 +99,7 @@ export default function RootLayout() {
         name: 'Promemoria foto',
         description: 'Sveglie brevi per i momenti fotografici del gruppo',
         importance: Notifications.AndroidImportance.HIGH,
-        sound: 'default',
+        sound: 'photo-reminder.mp3',
         enableVibrate: true,
         vibrationPattern: [0, 250, 140, 250],
       });

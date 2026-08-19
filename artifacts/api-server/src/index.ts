@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { deliverDuePhotoReminders } from "./routes/experiences";
 
 const rawPort = process.env["PORT"];
 
@@ -10,6 +11,11 @@ if (!rawPort) {
 }
 
 const port = Number(rawPort);
+const runReminderDelivery = () => {
+  void deliverDuePhotoReminders().catch((err) => {
+    logger.error({ err }, "Unable to process due photo reminders");
+  });
+};
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -22,4 +28,6 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  runReminderDelivery();
+  setInterval(runReminderDelivery, 15_000).unref();
 });

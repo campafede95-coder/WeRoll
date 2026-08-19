@@ -350,6 +350,26 @@ export const CloseExperienceResponse = zod.object({
 
 
 /**
+ * @summary Register this device for group photo reminders
+ */
+export const RegisterPushTokenParams = zod.object({
+  "experienceId": zod.coerce.string()
+})
+
+export const registerPushTokenBodyTokenMin = 10;
+export const registerPushTokenBodyTokenMax = 300;
+
+
+
+export const RegisterPushTokenBody = zod.object({
+  "token": zod.string().min(registerPushTokenBodyTokenMin).max(registerPushTokenBodyTokenMax),
+  "platform": zod.enum(['ios', 'android'])
+})
+
+export const RegisterPushTokenResponse = zod.void()
+
+
+/**
  * @summary Add a photo memory
  */
 export const CreateMemoryParams = zod.object({

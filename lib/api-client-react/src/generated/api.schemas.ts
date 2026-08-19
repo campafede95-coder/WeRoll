@@ -115,3 +115,20 @@ export interface CreateMemoryRequest {
   reminderId?: string | null;
 }
 
+export type RegisterPushTokenRequestPlatform = typeof RegisterPushTokenRequestPlatform[keyof typeof RegisterPushTokenRequestPlatform];
+
+
+export const RegisterPushTokenRequestPlatform = {
+  ios: 'ios',
+  android: 'android',
+} as const;
+
+export interface RegisterPushTokenRequest {
+  /**
+     * @minLength 10
+     * @maxLength 300
+     */
+  token: string;
+  platform: RegisterPushTokenRequestPlatform;
+}
+

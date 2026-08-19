@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
+import Constants from 'expo-constants';
+import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useRegisterPushToken, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 
@@ -47,44 +48,38 @@ export default function GroupSessionScreen() {
   const close = useCloseExperience();
   const updateReminder = useUpdateReminder();
   const [editing, setEditing] = useState<EditingReminder>(null);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const group = query.data;
+  const registerPushToken = useRegisterPushToken();
   const nextReminder = useMemo(() => group?.reminders.find((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now()), [group?.reminders]);
 
   useEffect(() => {
-    if (!group || group.sessionStatus !== 'active') return;
-    const schedule = async () => {
-      const scheduledKey = `pic-sync-scheduled-${group.id}`;
-      if (await AsyncStorage.getItem(scheduledKey)) return;
-      const permission = await Notifications.getPermissionsAsync();
+    if (!group || (Platform.OS !== 'ios' && Platform.OS !== 'android') || group.sessionStatus === 'closed') return;
+    const registerDevice = async () => {
+      const storageKey = `pic-sync-push-token-${group.id}`;
+      if (await AsyncStorage.getItem(storageKey)) return;
+      const existingPermission = await Notifications.getPermissionsAsync();
+      const permission = existingPermission.granted ? existingPermission : await Notifications.requestPermissionsAsync();
       if (!permission.granted) return;
-      const identifiers = await Promise.all(group.reminders.filter((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now()).map((reminder) => Notifications.scheduleNotificationAsync({
-        content: {
-          title: reminder.title,
-          body: 'Hai 15 minuti per scattare questo ricordo.',
-          sound: 'default',
-          data: { experienceId: group.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt },
-        },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(reminder.scheduledAt), channelId: 'pic-sync-reminders' },
-      })));
-      await AsyncStorage.setItem(scheduledKey, JSON.stringify(identifiers));
+      try {
+        const projectId = Constants.easConfig?.projectId ?? Constants.expoConfig?.extra?.eas?.projectId;
+        const response = await Notifications.getExpoPushTokenAsync(typeof projectId === 'string' ? { projectId } : undefined);
+        await AsyncStorage.setItem(storageKey, 'registering');
+        registerPushToken.mutate({ experienceId: group.id, data: { token: response.data, platform: Platform.OS === 'ios' ? 'ios' : 'android' } }, {
+          onSuccess: () => void AsyncStorage.setItem(storageKey, 'registered'),
+          onError: () => void AsyncStorage.removeItem(storageKey),
+        });
+      } catch (error) {
+        console.warn('Non è stato possibile registrare questo telefono per gli avvisi del gruppo.', error);
+      }
     };
-    void schedule();
-  }, [group]);
+    void registerDevice();
+  }, [group?.id, group?.sessionStatus, registerPushToken]);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(id) });
-  const enableNotifications = async () => {
-    const current = await Notifications.getPermissionsAsync();
-    const permission = current.granted ? current : await Notifications.requestPermissionsAsync();
-    setNotificationsEnabled(permission.granted);
-  };
   const startSession = () => { if (id) start.mutate({ experienceId: id }, { onSuccess: refresh }); };
   const closeSession = () => {
     if (!id) return;
     close.mutate({ experienceId: id }, { onSuccess: async () => {
-      const raw = await AsyncStorage.getItem(`pic-sync-scheduled-${id}`);
-      await Promise.all((raw ? JSON.parse(raw) : []).map((notificationId: string) => Notifications.cancelScheduledNotificationAsync(notificationId)));
-      await AsyncStorage.removeItem(`pic-sync-scheduled-${id}`);
       refresh();
     } });
   };
@@ -128,7 +123,6 @@ export default function GroupSessionScreen() {
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>In attesa dell&apos;organizzatore</Text>
           <Text style={[styles.body, { color: colors.mutedForeground }]}>Sei nel gruppo! Le sveglie sono a sorpresa — riceverai una notifica quando arriva il momento di scattare.</Text>
           <View style={styles.roster}>{group.participants.map((participant) => <Surface key={participant.id} style={styles.person}><Text style={[styles.personName, { color: colors.foreground }]}>{participant.displayName}{participant.isOrganizer ? ' ✨' : ''}</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{participant.isOrganizer ? 'Organizzatore' : 'tu'}</Text></Surface>)}</View>
-          <PrimaryButton label={notificationsEnabled ? 'Avvisi abilitati' : 'Abilita avvisi'} icon="bell" variant="quiet" onPress={() => void enableNotifications()} style={{ marginTop: 26 }} />
           <View style={styles.waitNote}><Text style={[styles.waitEmoji]}>⌛</Text><Text style={[styles.waitText, { color: colors.mutedForeground }]}>Attendi che l&apos;organizzatore avvii la sessione…</Text></View>
         </>
       ) : group.sessionStatus === 'lobby' ? (

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useCreateExperience } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -21,17 +22,19 @@ export default function CreateGroupScreen() {
   const colors = useColors();
   const router = useRouter();
   const createGroup = useCreateExperience();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [organizerName, setOrganizerName] = useState('');
   const [photoCount, setPhotoCount] = useState(12);
   const [windowStart, setWindowStart] = useState('09:00');
   const [windowEnd, setWindowEnd] = useState('18:00');
   const [created, setCreated] = useState<{ id: string; inviteCode: string } | null>(null);
 
-  const submit = () => {
+  const submit = async () => {
     if (!/^\d{2}:\d{2}$/.test(windowStart) || !/^\d{2}:\d{2}$/.test(windowEnd) || todayAt(windowEnd) <= todayAt(windowStart)) {
       Alert.alert('Controlla gli orari', 'Inserisci una fascia valida, ad esempio dalle 09:00 alle 18:00.');
       return;
     }
+    await AsyncStorage.setItem('pic-sync-guest-name', organizerName.trim());
     createGroup.mutate({
       data: {
         name: 'La nostra avventura',
@@ -51,7 +54,7 @@ export default function CreateGroupScreen() {
     });
   };
 
-  if (step === 3 && created) {
+  if (step === 4 && created) {
     return (
       <View style={[styles.successPage, { backgroundColor: colors.background }]}>
         <AppHeader title="Gruppo creato" back />
@@ -76,10 +79,16 @@ export default function CreateGroupScreen() {
       <AppHeader title="Crea un gruppo" back />
       {step === 1 ? (
         <>
+          <View style={styles.intro}><View style={[styles.introIcon, { backgroundColor: colors.secondary }]}><Feather name="user" size={22} color={colors.primary} /></View><Text style={[styles.heading, { color: colors.foreground }]}>Come ti chiami?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Comparirai come organizzatore del gruppo.</Text></View>
+          <TextInput value={organizerName} onChangeText={setOrganizerName} autoCapitalize="words" maxLength={40} placeholder="Il tuo nome" placeholderTextColor={colors.mutedForeground} style={[styles.nameInput, { backgroundColor: colors.card, borderColor: colors.input, color: colors.foreground }]} />
+          <PrimaryButton label="Avanti" icon="arrow-right" onPress={() => setStep(2)} disabled={!organizerName.trim()} style={styles.actionButton} />
+        </>
+      ) : step === 2 ? (
+        <>
           <View style={styles.intro}><View style={[styles.introIcon, { backgroundColor: colors.secondary }]}><Feather name="camera" size={22} color={colors.primary} /></View><Text style={[styles.heading, { color: colors.foreground }]}>Quante foto volete?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Numero totale di foto da scattare durante l&apos;avventura.</Text></View>
           <View style={styles.grid}>{options.map((count) => <Pressable key={count} accessibilityRole="button" accessibilityLabel={`${count} foto`} onPress={() => setPhotoCount(count)} style={({ pressed }) => [styles.countOption, { borderColor: count === photoCount ? colors.primary : colors.border, backgroundColor: count === photoCount ? colors.primary : colors.card }, pressed && { opacity: 0.78 }]}><Text style={[styles.countText, { color: count === photoCount ? colors.primaryForeground : colors.foreground }]}>{count}</Text></Pressable>)}</View>
           <Text style={[styles.selectedCount, { color: colors.mutedForeground }]}>{photoCount} foto totali</Text>
-          <PrimaryButton label="Avanti" icon="arrow-right" onPress={() => setStep(2)} style={styles.actionButton} />
+          <PrimaryButton label="Avanti" icon="arrow-right" onPress={() => setStep(3)} style={styles.actionButton} />
         </>
       ) : (
         <>
@@ -88,7 +97,7 @@ export default function CreateGroupScreen() {
             <View style={[styles.timeCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>INIZIO</Text><TextInput value={windowStart} onChangeText={setWindowStart} keyboardType="numbers-and-punctuation" maxLength={5} style={[styles.timeInput, { color: colors.foreground }]} /><Feather name="clock" size={22} color={colors.foreground} /></View>
             <View style={[styles.timeCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>FINE</Text><TextInput value={windowEnd} onChangeText={setWindowEnd} keyboardType="numbers-and-punctuation" maxLength={5} style={[styles.timeInput, { color: colors.foreground }]} /><Feather name="clock" size={22} color={colors.foreground} /></View>
           </View>
-          <PrimaryButton label="Crea gruppo" icon="arrow-right" onPress={submit} loading={createGroup.isPending} style={styles.actionButton} />
+          <PrimaryButton label="Crea gruppo" icon="arrow-right" onPress={() => void submit()} loading={createGroup.isPending} style={styles.actionButton} />
         </>
       )}
     </KeyboardAwareScrollViewCompat>
@@ -101,6 +110,7 @@ const styles = StyleSheet.create({
   introIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   heading: { fontFamily: 'Inter_700Bold', fontSize: 25, lineHeight: 30, letterSpacing: -0.8 },
   body: { fontFamily: 'Inter_400Regular', fontSize: 15, lineHeight: 21, marginTop: 8, maxWidth: 345 },
+  nameInput: { height: 58, borderWidth: 1, borderRadius: 17, paddingHorizontal: 17, fontFamily: 'Inter_400Regular', fontSize: 17, marginTop: 33 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 11, marginTop: 33 },
   countOption: { width: '30.8%', aspectRatio: 1.22, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   countText: { fontFamily: 'Inter_700Bold', fontSize: 27, letterSpacing: -0.5 },

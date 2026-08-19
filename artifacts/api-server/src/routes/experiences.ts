@@ -1,11 +1,61 @@
 import { Router, type Request, type Response } from "express";
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { db, experiencesTable, memoriesTable, participantsTable, remindersTable, usersTable } from "@workspace/db";
+import { and, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { db, experiencesTable, memoriesTable, participantsTable, pushTokensTable, remindersTable, usersTable } from "@workspace/db";
 import { z } from "zod";
+import { logger } from "../lib/logger";
 
 const router = Router();
 const id = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const inviteCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+const PHOTO_WINDOW_MS = 15 * 60 * 1000;
+const REMINDER_SOUND = "photo-reminder.mp3";
+const REMINDER_CHANNEL = "pic-sync-reminders-v2";
+
+export async function deliverDuePhotoReminders() {
+  const now = new Date();
+  const dueReminders = await db
+    .select({ reminder: remindersTable, experience: experiencesTable, organizerName: usersTable.displayName })
+    .from(remindersTable)
+    .innerJoin(experiencesTable, eq(experiencesTable.id, remindersTable.experienceId))
+    .innerJoin(usersTable, eq(usersTable.id, experiencesTable.ownerId))
+    .where(and(
+      eq(experiencesTable.sessionStatus, "active"),
+      isNull(remindersTable.notifiedAt),
+      lte(remindersTable.scheduledAt, now),
+      gte(remindersTable.scheduledAt, new Date(now.getTime() - PHOTO_WINDOW_MS)),
+    ));
+  for (const { reminder, experience, organizerName } of dueReminders) {
+    const members = await db.select({ userId: participantsTable.userId }).from(participantsTable)
+      .where(eq(participantsTable.experienceId, experience.id));
+    const userIds = members.map((member) => member.userId);
+    const tokens = userIds.length ? await db.select({ token: pushTokensTable.token }).from(pushTokensTable)
+      .where(inArray(pushTokensTable.userId, userIds)) : [];
+    if (!tokens.length) continue;
+    const claimed = await db.update(remindersTable).set({ notifiedAt: now })
+      .where(and(eq(remindersTable.id, reminder.id), isNull(remindersTable.notifiedAt))).returning({ id: remindersTable.id });
+    if (!claimed[0]) continue;
+    try {
+      const response = await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(tokens.map(({ token }) => ({
+          to: token,
+          title: `${organizerName} · ${reminder.title}`,
+          body: `${organizerName} ti invita a scattare: hai 15 minuti per questo ricordo.`,
+          sound: REMINDER_SOUND,
+          priority: "high",
+          channelId: REMINDER_CHANNEL,
+          data: { experienceId: experience.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt.toISOString() },
+        }))),
+      });
+      if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
+    } catch (error) {
+      await db.update(remindersTable).set({ notifiedAt: null })
+        .where(and(eq(remindersTable.id, reminder.id), eq(remindersTable.notifiedAt, now)));
+      logger.error({ err: error, reminderId: reminder.id }, "Unable to deliver photo reminder push notification");
+    }
+  }
+}
 
 function guest(req: Request, res: Response) {
   const userId = req.header("x-pic-sync-guest-id")?.trim();
@@ -224,6 +274,27 @@ router.post("/:experienceId/start", async (req, res) => {
     .where(eq(experiencesTable.id, experience.id)).returning();
   const detail = await serializeExperience(updated[0], userId);
   return res.json({ ...detail, participants: [], reminders: [], memories: [] });
+});
+
+router.post("/:experienceId/push-token", async (req, res) => {
+  const userId = guest(req, res);
+  if (!userId) return;
+  if (!await canAccess(req.params.experienceId, userId)) return res.status(403).json({ error: "Forbidden" });
+  const body = z.object({
+    token: z.string().min(10).max(300),
+    platform: z.enum(["ios", "android"]),
+  }).parse(req.body);
+  await db.insert(pushTokensTable).values({
+    id: id(),
+    userId,
+    token: body.token,
+    platform: body.platform,
+    updatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: pushTokensTable.token,
+    set: { userId, platform: body.platform, updatedAt: new Date() },
+  });
+  return res.status(204).send();
 });
 
 router.post("/:experienceId/close", async (req, res) => {
