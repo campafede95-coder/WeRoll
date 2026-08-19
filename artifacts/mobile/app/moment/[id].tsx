@@ -71,7 +71,10 @@ export default function PhotoMomentScreen() {
           accessibilityLabel={isTest ? 'Scatta foto di prova senza salvare' : 'Scatta foto'}
           testID="photo-window-capture"
           disabled={expired}
-          onPress={() => router.push(`${`/capture/${id}`}${isTest ? '?test=true' : ''}` as never)}
+          onPress={() => router.push({
+            pathname: '/capture/[id]',
+            params: { id, ...(isTest ? { test: 'true' } : {}) },
+          })}
           style={({ pressed }) => [styles.primaryAction, { backgroundColor: expired ? colors.muted : colors.primary }, pressed && !expired && styles.pressed]}
         >
           <Feather name="camera" size={23} color={expired ? colors.mutedForeground : colors.primaryForeground} />

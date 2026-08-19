@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
-import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
+import Constants from 'expo-constants';
+import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useRegisterPushToken, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -49,11 +50,42 @@ export default function GroupSessionScreen() {
   const start = useStartExperience();
   const close = useCloseExperience();
   const updateReminder = useUpdateReminder();
+  const registerPushToken = useRegisterPushToken();
   const [editing, setEditing] = useState<EditingReminder>(null);
   const [testNotificationState, setTestNotificationState] = useState<TestNotificationState>('idle');
   const schedulingExperiences = useRef(new Set<string>());
   const group = query.data;
-  const nextReminder = useMemo(() => group?.reminders.find((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now()), [group?.reminders]);
+
+  useEffect(() => {
+    if (!group || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
+    let cancelled = false;
+
+    const registerThisDevice = async () => {
+      try {
+        const currentPermission = await Notifications.getPermissionsAsync();
+        const permission = currentPermission.granted ? currentPermission : await Notifications.requestPermissionsAsync();
+        if (!permission.granted) return;
+
+        const projectId = Constants.easConfig?.projectId ?? Constants.expoConfig?.extra?.eas?.projectId;
+        if (!projectId) {
+          console.warn('Le notifiche remote richiedono un Expo/EAS Project ID configurato.');
+          return;
+        }
+
+        const token = await Notifications.getExpoPushTokenAsync({ projectId });
+        if (cancelled || !token.data) return;
+        registerPushToken.mutate({
+          experienceId: group.id,
+          data: { token: token.data, platform: Platform.OS === 'ios' ? 'ios' : 'android' },
+        });
+      } catch (error) {
+        console.warn('Non è stato possibile registrare questo telefono per gli avvisi del gruppo.', error);
+      }
+    };
+
+    void registerThisDevice();
+    return () => { cancelled = true; };
+  }, [group?.id]);
 
   useEffect(() => {
     if (!group || group.sessionStatus !== 'active' || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
@@ -231,7 +263,6 @@ export default function GroupSessionScreen() {
         </>
       ) : (
         <>
-          <View style={[styles.liveBanner, { backgroundColor: colors.primary }]}><View style={[styles.liveDot, { backgroundColor: colors.accent }]} /><View style={{ flex: 1 }}><Text style={[styles.liveKicker, { color: colors.primaryForeground }]}>ADESSO IN CORSO</Text><Text style={[styles.liveTitle, { color: colors.primaryForeground }]}>{nextReminder ? `Prossimo ricordo alle ${timeFromDate(nextReminder.scheduledAt, group.timeZone)}` : 'Tutte le sveglie sono passate'}</Text></View><Feather name="bell" size={22} color={colors.primaryForeground} /></View>
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Quando suona una sveglia hai 15 minuti per scattare. Puoi catturare un ricordo anche in qualsiasi altro momento.</Text>
           <PrimaryButton label="Scatto libero" icon="camera" onPress={() => router.push(`/capture/${id}` as never)} style={{ marginTop: 24 }} />
           <Surface style={styles.albumPreview}><Feather name="image" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.personName, { color: colors.foreground }]}>Album condiviso</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{group.memories.length} ricordi raccolti finora</Text></View></Surface>
@@ -258,7 +289,7 @@ const styles = StyleSheet.create({
   listTitle: { fontFamily: 'Inter_700Bold', fontSize: 18, letterSpacing: -0.25, marginTop: 25, marginBottom: 11 }, reminderList: { gap: 9 }, reminder: { minHeight: 67, borderWidth: 1, borderRadius: 17, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', gap: 16 }, reminderHour: { fontFamily: 'Inter_700Bold', fontSize: 26, letterSpacing: -0.5, flex: 1 },
   rosterTitle: { fontFamily: 'Inter_700Bold', fontSize: 17, marginTop: 27, marginBottom: 10 }, roster: { gap: 8, marginTop: 20 }, person: { minHeight: 56, paddingVertical: 11, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, personName: { fontFamily: 'Inter_700Bold', fontSize: 15 }, personRole: { fontFamily: 'Inter_400Regular', fontSize: 13 },
   waitNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 4 }, waitEmoji: { fontSize: 16 }, waitText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
-  liveBanner: { marginTop: 20, borderRadius: 22, padding: 17, flexDirection: 'row', alignItems: 'center', gap: 11 }, liveDot: { width: 10, height: 10, borderRadius: 5 }, liveKicker: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.4 }, liveTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, marginTop: 4 }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
   testCard: { marginTop: 16, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11 }, testIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, testCopy: { flex: 1 }, testTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 }, testBody: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16, marginTop: 3 }, testButton: { minWidth: 62, minHeight: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8 }, testButtonLabel: { fontFamily: 'Inter_700Bold', fontSize: 10 }, pressed: { opacity: 0.8, transform: [{ scale: 0.96 }] },
   eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 },
   modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
