@@ -79,7 +79,7 @@ export default function CreateGroupScreen() {
           <Text style={[styles.copyHint, { color: colors.mutedForeground }]}>Tocca per copiare il codice</Text>
           <Surface style={styles.participantCard}><Feather name="users" size={19} color={colors.primary} /><View><Text style={[styles.participantTitle, { color: colors.foreground }]}>Partecipanti collegati (1)</Text><Text style={[styles.participantBody, { color: colors.mutedForeground }]}>Organizzatore · tu</Text></View></Surface>
         </View>
-        <PrimaryButton label="Vai alla sessione" icon="arrow-right" onPress={() => router.replace(`/experience/${created.id}` as never)} style={styles.bottomButton} />
+        <PrimaryButton label="Vai alla sessione" icon="arrow-right" onPress={() => router.replace({ pathname: '/experience/[id]', params: { id: created.id, experienceId: created.id } })} style={styles.bottomButton} />
       </View>
     );
   }

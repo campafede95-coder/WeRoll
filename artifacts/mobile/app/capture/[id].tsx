@@ -11,14 +11,16 @@ import { Screen, PrimaryButton } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 
 const SAVE_TIMEOUT_MS = 45_000;
+const EXPERIENCE_ID_PATTERN = /^\d+-[a-z0-9]+$/i;
 
 export default function CaptureScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { id, test, autoCamera, reminderId } = useLocalSearchParams<{ id: string; test?: string; autoCamera?: string; reminderId?: string }>();
+  const { id, experienceId: experienceIdParam, test, autoCamera, reminderId } = useLocalSearchParams<{ id: string; experienceId?: string; test?: string; autoCamera?: string; reminderId?: string }>();
   const isTest = test === 'true';
   const routeExperienceId = Array.isArray(id) ? id[0] : id;
-  const experienceId = typeof routeExperienceId === 'string' ? routeExperienceId.trim() : '';
+  const queryExperienceId = Array.isArray(experienceIdParam) ? experienceIdParam[0] : experienceIdParam;
+  const experienceId = [queryExperienceId, routeExperienceId].find((value): value is string => typeof value === 'string' && EXPERIENCE_ID_PATTERN.test(value.trim()))?.trim() ?? '';
   const queryClient = useQueryClient();
   const experience = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId) } }).data;
   const saveControllerRef = useRef<AbortController | null>(null);

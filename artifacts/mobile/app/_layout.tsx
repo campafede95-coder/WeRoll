@@ -40,6 +40,7 @@ function openPhotoMoment(notification: Notifications.Notification) {
     pathname: '/moment/[id]',
     params: {
       id: experienceId,
+      experienceId,
       reminderId: typeof data.reminderId === 'string' ? data.reminderId : '',
       scheduledAt: typeof data.scheduledAt === 'string' ? data.scheduledAt : new Date(notification.date).toISOString(),
       test: isTest ? 'true' : '',

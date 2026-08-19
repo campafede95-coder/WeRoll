@@ -156,7 +156,7 @@ export function ExperienceCard({ experience }: { experience: Experience }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Apri ${experience.name}`}
-       onPress={() => { void Haptics.selectionAsync(); router.push(`/experience/${experience.id}` as never); }}
+        onPress={() => { void Haptics.selectionAsync(); router.push({ pathname: '/experience/[id]', params: { id: experience.id, experienceId: experience.id } }); }}
       style={({ pressed }) => [styles.experienceCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && { transform: [{ scale: 0.985 }], opacity: 0.9 }]}
     >
       <Image source={imageUri} contentFit="cover" transition={220} style={styles.experienceImage} />

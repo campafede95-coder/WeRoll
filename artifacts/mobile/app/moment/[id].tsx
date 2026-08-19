@@ -9,6 +9,7 @@ import { useColors } from '@/hooks/useColors';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 const TEST_PHOTO_WINDOW_MS = 30 * 1000;
+const EXPERIENCE_ID_PATTERN = /^\d+-[a-z0-9]+$/i;
 
 function formatCountdown(milliseconds: number) {
   const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -21,9 +22,12 @@ export default function PhotoMomentScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id, reminderId, scheduledAt, test, notificationId, source } = useLocalSearchParams<{ id: string; reminderId?: string; scheduledAt?: string; test?: string; notificationId?: string; source?: string }>();
+  const { id, experienceId: experienceIdParam, reminderId, scheduledAt, test, notificationId } = useLocalSearchParams<{ id: string; experienceId?: string; reminderId?: string; scheduledAt?: string; test?: string; notificationId?: string }>();
   const isTest = test === 'true';
-  const experience = useGetExperience(id, { query: { queryKey: getGetExperienceQueryKey(id), enabled: Boolean(id) && !isTest } }).data;
+  const routeExperienceId = Array.isArray(id) ? id[0] : id;
+  const queryExperienceId = Array.isArray(experienceIdParam) ? experienceIdParam[0] : experienceIdParam;
+  const experienceId = [queryExperienceId, routeExperienceId].find((value): value is string => typeof value === 'string' && EXPERIENCE_ID_PATTERN.test(value.trim()))?.trim() ?? '';
+  const experience = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId) && !isTest } }).data;
   const reminder = useMemo(() => experience?.reminders.find((item) => item.id === reminderId), [experience?.reminders, reminderId]);
   const startTime = useMemo(() => {
     const value = scheduledAt || reminder?.scheduledAt;
@@ -52,7 +56,8 @@ export default function PhotoMomentScreen() {
     router.dismissTo({
       pathname: '/experience/[id]',
       params: {
-        id: experience?.id ?? id,
+        id: experienceId,
+        experienceId,
         ...(isTest || !reminderId || !scheduledAt ? {} : { momentReminderId: reminderId, momentScheduledAt: scheduledAt }),
       },
     });
@@ -91,7 +96,8 @@ export default function PhotoMomentScreen() {
           onPress={() => router.push({
             pathname: '/capture/[id]',
             params: {
-              id: experience?.id ?? id,
+              id: experienceId,
+              experienceId,
               autoCamera: 'true',
               ...(isTest ? { test: 'true' } : {}),
               ...(reminderId ? { reminderId } : {}),

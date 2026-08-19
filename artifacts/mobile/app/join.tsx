@@ -19,7 +19,7 @@ export default function JoinGroupScreen() {
     setError('');
     await AsyncStorage.setItem('pic-sync-guest-name', name.trim());
     join.mutate({ data: { inviteCode: code, displayName: name.trim() } }, {
-      onSuccess: (group) => router.replace(`/experience/${group.id}` as never),
+      onSuccess: (group) => router.replace({ pathname: '/experience/[id]', params: { id: group.id, experienceId: group.id } }),
       onError: () => setError('Codice non valido. Controllalo e riprova.'),
     });
   };
