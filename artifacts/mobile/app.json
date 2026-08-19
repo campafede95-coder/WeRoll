@@ -31,6 +31,7 @@
         }
       ],
       "expo-font",
+      "expo-dev-client",
       "expo-web-browser",
       [
         "expo-notifications",
