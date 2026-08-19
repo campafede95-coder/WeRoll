@@ -576,6 +576,222 @@ export const useCreateReminder = <TError = ErrorType<unknown>,
       return useMutation(getCreateReminderMutationOptions(options));
     }
 
+export const getUpdateReminderUrl = (experienceId: string,
+    reminderId: string,) => {
+
+
+
+
+  return `/api/experiences/${experienceId}/reminders/${reminderId}`
+}
+
+/**
+ * @summary Update a scheduled reminder
+ */
+export const updateReminder = async (experienceId: string,
+    reminderId: string,
+    createReminderRequest: CreateReminderRequest, options?: Parameters<typeof customFetch>[1]): Promise<Reminder> => {
+
+  return customFetch<Reminder>(getUpdateReminderUrl(experienceId,reminderId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createReminderRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateReminderMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateReminder>>, TError,{experienceId: string;reminderId: string;data: BodyType<CreateReminderRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateReminder>>, TError,{experienceId: string;reminderId: string;data: BodyType<CreateReminderRequest>}, TContext> => {
+
+const mutationKey = ['updateReminder'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateReminder>>, {experienceId: string;reminderId: string;data: BodyType<CreateReminderRequest>}> = (props) => {
+          const {experienceId,reminderId,data} = props ?? {};
+
+          return  updateReminder(experienceId,reminderId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateReminderMutationResult = NonNullable<Awaited<ReturnType<typeof updateReminder>>>
+    export type UpdateReminderMutationBody = BodyType<CreateReminderRequest>
+    export type UpdateReminderMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update a scheduled reminder
+ */
+export const useUpdateReminder = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateReminder>>, TError,{experienceId: string;reminderId: string;data: BodyType<CreateReminderRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateReminder>>,
+        TError,
+        {experienceId: string;reminderId: string;data: BodyType<CreateReminderRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateReminderMutationOptions(options));
+    }
+
+export const getStartExperienceUrl = (experienceId: string,) => {
+
+
+
+
+  return `/api/experiences/${experienceId}/start`
+}
+
+/**
+ * @summary Start the reminder session
+ */
+export const startExperience = async (experienceId: string, options?: Parameters<typeof customFetch>[1]): Promise<ExperienceDetail> => {
+
+  return customFetch<ExperienceDetail>(getStartExperienceUrl(experienceId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStartExperienceMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startExperience>>, TError,{experienceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startExperience>>, TError,{experienceId: string}, TContext> => {
+
+const mutationKey = ['startExperience'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startExperience>>, {experienceId: string}> = (props) => {
+          const {experienceId} = props ?? {};
+
+          return  startExperience(experienceId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartExperienceMutationResult = NonNullable<Awaited<ReturnType<typeof startExperience>>>
+
+    export type StartExperienceMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Start the reminder session
+ */
+export const useStartExperience = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startExperience>>, TError,{experienceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startExperience>>,
+        TError,
+        {experienceId: string},
+        TContext
+      > => {
+      return useMutation(getStartExperienceMutationOptions(options));
+    }
+
+export const getCloseExperienceUrl = (experienceId: string,) => {
+
+
+
+
+  return `/api/experiences/${experienceId}/close`
+}
+
+/**
+ * @summary Close the reminder session
+ */
+export const closeExperience = async (experienceId: string, options?: Parameters<typeof customFetch>[1]): Promise<ExperienceDetail> => {
+
+  return customFetch<ExperienceDetail>(getCloseExperienceUrl(experienceId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCloseExperienceMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof closeExperience>>, TError,{experienceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof closeExperience>>, TError,{experienceId: string}, TContext> => {
+
+const mutationKey = ['closeExperience'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof closeExperience>>, {experienceId: string}> = (props) => {
+          const {experienceId} = props ?? {};
+
+          return  closeExperience(experienceId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CloseExperienceMutationResult = NonNullable<Awaited<ReturnType<typeof closeExperience>>>
+
+    export type CloseExperienceMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Close the reminder session
+ */
+export const useCloseExperience = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof closeExperience>>, TError,{experienceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof closeExperience>>,
+        TError,
+        {experienceId: string},
+        TContext
+      > => {
+      return useMutation(getCloseExperienceMutationOptions(options));
+    }
+
 export const getCreateMemoryUrl = (experienceId: string,) => {
 
 

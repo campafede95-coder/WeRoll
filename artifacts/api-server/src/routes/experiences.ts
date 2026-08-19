@@ -1,43 +1,35 @@
 import { Router, type Request, type Response } from "express";
-import { getAuth } from "@clerk/express";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { db } from "@workspace/db";
-import {
-  experiencesTable,
-  memoriesTable,
-  participantsTable,
-  remindersTable,
-  usersTable,
-} from "@workspace/db";
+import { db, experiencesTable, memoriesTable, participantsTable, remindersTable, usersTable } from "@workspace/db";
 import { z } from "zod";
 
 const router = Router();
-type AuthRequest = Request & { userId: string };
 const id = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const inviteCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
-function requireAuth(req: Request, res: Response, next: () => void) {
-  const userId = getAuth(req).userId;
+function guest(req: Request, res: Response) {
+  const userId = req.header("x-pic-sync-guest-id")?.trim();
   if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
+    res.status(400).json({ error: "Missing guest identity" });
+    return null;
   }
-  (req as AuthRequest).userId = userId;
-  next();
+  return userId.slice(0, 80);
 }
 
-function statusFor(startDate: Date, endDate: Date) {
-  const now = Date.now();
-  if (now < startDate.getTime()) return "upcoming" as const;
-  if (now > endDate.getTime()) return "completed" as const;
-  return "ongoing" as const;
+async function ensureUser(userId: string, displayName?: string) {
+  await db
+    .insert(usersTable)
+    .values({ id: userId, displayName: displayName?.trim().slice(0, 40) || "Partecipante" })
+    .onConflictDoNothing();
 }
 
-async function ensureUser(userId: string) {
-  await db.insert(usersTable).values({ id: userId, displayName: "Amico" }).onConflictDoNothing();
+function statusFor(experience: typeof experiencesTable.$inferSelect) {
+  if (experience.sessionStatus === "closed") return "completed" as const;
+  if (experience.sessionStatus === "active") return "ongoing" as const;
+  return "upcoming" as const;
 }
 
-async function serializeExperience(experience: typeof experiencesTable.$inferSelect) {
+async function serializeExperience(experience: typeof experiencesTable.$inferSelect, viewerId?: string) {
   const participants = await db
     .select({ id: usersTable.id, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl })
     .from(participantsTable)
@@ -51,101 +43,189 @@ async function serializeExperience(experience: typeof experiencesTable.$inferSel
     coverImageUri: experience.coverImageUri,
     startDate: experience.startDate,
     endDate: experience.endDate,
-    status: statusFor(experience.startDate, experience.endDate),
+    status: statusFor(experience),
     participantCount: participants.length,
     inviteCode: experience.inviteCode,
+    targetPhotoCount: experience.targetPhotoCount,
+    sessionStatus: experience.sessionStatus as "lobby" | "active" | "closed",
+    windowStart: experience.windowStart,
+    windowEnd: experience.windowEnd,
+    isOwner: experience.ownerId === viewerId,
   };
 }
 
-router.use(requireAuth);
+function buildReminderDates(start: string, end: string, count: number) {
+  const [startHour, startMinute] = start.split(":").map(Number);
+  const [endHour, endMinute] = end.split(":").map(Number);
+  const now = new Date();
+  const first = new Date(now);
+  first.setHours(startHour || 9, startMinute || 0, 0, 0);
+  const last = new Date(now);
+  last.setHours(endHour || 18, endMinute || 0, 0, 0);
+  if (last <= first) last.setDate(last.getDate() + 1);
+  if (last < now) {
+    first.setDate(first.getDate() + 1);
+    last.setDate(last.getDate() + 1);
+  }
+  const span = last.getTime() - first.getTime();
+  return Array.from({ length: count }, (_, index) => {
+    const slot = span / (count + 1);
+    const jitter = (Math.random() - 0.5) * Math.min(slot * 0.38, 18 * 60 * 1000);
+    return new Date(first.getTime() + slot * (index + 1) + jitter);
+  }).sort((a, b) => a.getTime() - b.getTime());
+}
+
+async function canAccess(experienceId: string, userId: string) {
+  const row = await db.select({ id: participantsTable.id }).from(participantsTable)
+    .where(and(eq(participantsTable.experienceId, experienceId), eq(participantsTable.userId, userId))).limit(1);
+  return Boolean(row[0]);
+}
+
+async function requireOwner(experienceId: string, userId: string, res: Response) {
+  const experience = await db.select().from(experiencesTable)
+    .where(and(eq(experiencesTable.id, experienceId), eq(experiencesTable.ownerId, userId))).limit(1);
+  if (!experience[0]) {
+    res.status(403).json({ error: "Only the group creator can do this" });
+    return null;
+  }
+  return experience[0];
+}
 
 router.get("/", async (req, res) => {
-  const userId = (req as unknown as AuthRequest).userId;
-  await ensureUser(userId);
-  const memberships = await db.select({ experienceId: participantsTable.experienceId })
-    .from(participantsTable).where(eq(participantsTable.userId, userId));
+  const userId = guest(req, res);
+  if (!userId) return;
+  await ensureUser(userId, req.header("x-pic-sync-guest-name") ?? undefined);
+  const memberships = await db.select({ experienceId: participantsTable.experienceId }).from(participantsTable)
+    .where(eq(participantsTable.userId, userId));
   if (!memberships.length) return res.json([]);
   const experiences = await db.select().from(experiencesTable)
-    .where(inArray(experiencesTable.id, memberships.map((item) => item.experienceId)))
-    .orderBy(desc(experiencesTable.startDate));
-  return res.json(await Promise.all(experiences.map(serializeExperience)));
+    .where(inArray(experiencesTable.id, memberships.map((membership) => membership.experienceId)))
+    .orderBy(desc(experiencesTable.createdAt));
+  return res.json(await Promise.all(experiences.map((experience) => serializeExperience(experience, userId))));
 });
 
 router.post("/", async (req, res) => {
-  const userId = (req as AuthRequest).userId;
+  const userId = guest(req, res);
+  if (!userId) return;
   const body = z.object({
-    name: z.string().min(1),
+    name: z.string().nullish(),
     description: z.string().nullish(),
     location: z.string().nullish(),
     coverImageUri: z.string().nullish(),
     startDate: z.coerce.date(),
     endDate: z.coerce.date(),
+    targetPhotoCount: z.coerce.number().int().min(1).max(36).default(12),
+    windowStart: z.string().regex(/^\d{2}:\d{2}$/).nullish(),
+    windowEnd: z.string().regex(/^\d{2}:\d{2}$/).nullish(),
   }).parse(req.body);
-  await ensureUser(userId);
+  await ensureUser(userId, req.header("x-pic-sync-guest-name") ?? undefined);
   const experience = {
-    id: id(), ownerId: userId, inviteCode: inviteCode(),
-    ...body, description: body.description ?? null, location: body.location ?? null, coverImageUri: body.coverImageUri ?? null,
+    id: id(),
+    ownerId: userId,
+    name: body.name?.trim() || "La nostra avventura",
+    description: body.description ?? null,
+    location: body.location ?? null,
+    coverImageUri: body.coverImageUri ?? null,
+    startDate: body.startDate,
+    endDate: body.endDate,
+    inviteCode: inviteCode(),
+    targetPhotoCount: body.targetPhotoCount,
+    windowStart: body.windowStart ?? "09:00",
+    windowEnd: body.windowEnd ?? "18:00",
+    sessionStatus: "lobby",
     createdAt: new Date(),
   };
   await db.insert(experiencesTable).values(experience);
   await db.insert(participantsTable).values({ id: id(), experienceId: experience.id, userId });
-  return res.status(201).json(await serializeExperience(experience));
+  const reminderDates = buildReminderDates(experience.windowStart, experience.windowEnd, experience.targetPhotoCount);
+  await db.insert(remindersTable).values(reminderDates.map((scheduledAt, index) => ({
+    id: id(),
+    experienceId: experience.id,
+    createdBy: userId,
+    title: `Ricordo ${index + 1}`,
+    message: "Hai 15 minuti per scattare questo ricordo.",
+    scheduledAt,
+  })));
+  return res.status(201).json(await serializeExperience(experience, userId));
 });
 
 router.post("/join", async (req, res) => {
-  const userId = (req as unknown as AuthRequest).userId;
+  const userId = guest(req, res);
+  if (!userId) return;
   const code = z.object({ inviteCode: z.string().min(4) }).parse(req.body).inviteCode.toUpperCase();
-  await ensureUser(userId);
+  await ensureUser(userId, req.header("x-pic-sync-guest-name") ?? undefined);
   const experience = await db.select().from(experiencesTable).where(eq(experiencesTable.inviteCode, code)).limit(1);
   if (!experience[0]) return res.status(404).json({ error: "Invite not found" });
-  await db.insert(participantsTable).values({ id: id(), experienceId: experience[0].id, userId }).onConflictDoNothing();
-  return res.json(await serializeExperience(experience[0]));
+  const present = await canAccess(experience[0].id, userId);
+  if (!present) await db.insert(participantsTable).values({ id: id(), experienceId: experience[0].id, userId });
+  return res.json(await serializeExperience(experience[0], userId));
 });
 
 router.get("/:experienceId", async (req, res) => {
-  const userId = (req as unknown as AuthRequest).userId;
+  const userId = guest(req, res);
+  if (!userId) return;
   const experience = await db.select().from(experiencesTable).where(eq(experiencesTable.id, req.params.experienceId)).limit(1);
-  if (!experience[0]) return res.status(404).json({ error: "Experience not found" });
-  const access = await db.select().from(participantsTable).where(and(eq(participantsTable.experienceId, experience[0].id), eq(participantsTable.userId, userId))).limit(1);
-  if (!access[0]) return res.status(403).json({ error: "Forbidden" });
-  const [base, reminders, memoryRows] = await Promise.all([
-    serializeExperience(experience[0]),
+  if (!experience[0]) return res.status(404).json({ error: "Group not found" });
+  if (!await canAccess(experience[0].id, userId)) return res.status(403).json({ error: "Forbidden" });
+  const [base, participants, reminders, memoryRows] = await Promise.all([
+    serializeExperience(experience[0], userId),
+    db.select({ id: usersTable.id, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl })
+      .from(participantsTable).innerJoin(usersTable, eq(usersTable.id, participantsTable.userId))
+      .where(eq(participantsTable.experienceId, experience[0].id)),
     db.select().from(remindersTable).where(eq(remindersTable.experienceId, experience[0].id)).orderBy(remindersTable.scheduledAt),
     db.select({ memory: memoriesTable, authorName: usersTable.displayName, reminderTitle: remindersTable.title })
       .from(memoriesTable).innerJoin(usersTable, eq(usersTable.id, memoriesTable.authorId))
       .leftJoin(remindersTable, eq(remindersTable.id, memoriesTable.reminderId))
       .where(eq(memoriesTable.experienceId, experience[0].id)).orderBy(desc(memoriesTable.capturedAt)),
   ]);
-  return res.json({ ...base, participants: await db.select({ id: usersTable.id, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl }).from(participantsTable).innerJoin(usersTable, eq(usersTable.id, participantsTable.userId)).where(eq(participantsTable.experienceId, experience[0].id)), reminders, memories: memoryRows.map(({ memory, authorName, reminderTitle }) => ({ id: memory.id, imageUri: memory.imageUri, authorName, capturedAt: memory.capturedAt, reminderTitle: reminderTitle ?? null })) });
+  return res.json({ ...base, participants, reminders, memories: memoryRows.map(({ memory, authorName, reminderTitle }) => ({
+    id: memory.id, imageUri: memory.imageUri, authorName, capturedAt: memory.capturedAt, reminderTitle: reminderTitle ?? null,
+  })) });
 });
 
-router.patch("/:experienceId", async (req, res) => {
-  const userId = (req as unknown as AuthRequest).userId;
-  const body = z.object({ name: z.string().min(1), description: z.string().nullish(), location: z.string().nullish(), coverImageUri: z.string().nullish(), startDate: z.coerce.date(), endDate: z.coerce.date() }).parse(req.body);
-  const updated = await db.update(experiencesTable).set({ ...body, description: body.description ?? null, location: body.location ?? null, coverImageUri: body.coverImageUri ?? null }).where(and(eq(experiencesTable.id, req.params.experienceId), eq(experiencesTable.ownerId, userId))).returning();
-  if (!updated[0]) return res.status(404).json({ error: "Experience not found" });
-  return res.json(await serializeExperience(updated[0]));
+router.post("/:experienceId/start", async (req, res) => {
+  const userId = guest(req, res);
+  if (!userId) return;
+  const experience = await requireOwner(req.params.experienceId, userId, res);
+  if (!experience) return;
+  const updated = await db.update(experiencesTable).set({ sessionStatus: "active" })
+    .where(eq(experiencesTable.id, experience.id)).returning();
+  const detail = await serializeExperience(updated[0], userId);
+  return res.json({ ...detail, participants: [], reminders: [], memories: [] });
 });
 
-router.post("/:experienceId/reminders", async (req, res) => {
-  const userId = (req as unknown as AuthRequest).userId;
+router.post("/:experienceId/close", async (req, res) => {
+  const userId = guest(req, res);
+  if (!userId) return;
+  const experience = await requireOwner(req.params.experienceId, userId, res);
+  if (!experience) return;
+  const updated = await db.update(experiencesTable).set({ sessionStatus: "closed" })
+    .where(eq(experiencesTable.id, experience.id)).returning();
+  const detail = await serializeExperience(updated[0], userId);
+  return res.json({ ...detail, participants: [], reminders: [], memories: [] });
+});
+
+router.patch("/:experienceId/reminders/:reminderId", async (req, res) => {
+  const userId = guest(req, res);
+  if (!userId) return;
+  const experience = await requireOwner(req.params.experienceId, userId, res);
+  if (!experience) return;
   const body = z.object({ title: z.string().min(1), message: z.string().nullish(), scheduledAt: z.coerce.date() }).parse(req.body);
-  const access = await db.select().from(participantsTable).where(and(eq(participantsTable.experienceId, req.params.experienceId), eq(participantsTable.userId, userId))).limit(1);
-  if (!access[0]) return res.status(403).json({ error: "Forbidden" });
-  const reminder = { id: id(), experienceId: req.params.experienceId, createdBy: userId, ...body, message: body.message ?? null };
-  await db.insert(remindersTable).values(reminder);
-  return res.status(201).json(reminder);
+  const updated = await db.update(remindersTable).set({ ...body, message: body.message ?? null })
+    .where(and(eq(remindersTable.id, req.params.reminderId), eq(remindersTable.experienceId, experience.id))).returning();
+  if (!updated[0]) return res.status(404).json({ error: "Reminder not found" });
+  return res.json(updated[0]);
 });
 
 router.post("/:experienceId/memories", async (req, res) => {
-  const userId = (req as unknown as AuthRequest).userId;
+  const userId = guest(req, res);
+  if (!userId) return;
+  if (!await canAccess(req.params.experienceId, userId)) return res.status(403).json({ error: "Forbidden" });
   const body = z.object({ imageUri: z.string().min(1), capturedAt: z.coerce.date(), reminderId: z.string().nullish() }).parse(req.body);
-  const access = await db.select().from(participantsTable).where(and(eq(participantsTable.experienceId, req.params.experienceId), eq(participantsTable.userId, userId))).limit(1);
-  if (!access[0]) return res.status(403).json({ error: "Forbidden" });
-  await ensureUser(userId);
   const memory = { id: id(), experienceId: req.params.experienceId, authorId: userId, ...body, reminderId: body.reminderId ?? null };
   await db.insert(memoriesTable).values(memory);
-  return res.status(201).json({ id: memory.id, imageUri: memory.imageUri, authorName: "Amico", capturedAt: memory.capturedAt, reminderTitle: null });
+  const author = await db.select({ displayName: usersTable.displayName }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  return res.status(201).json({ id: memory.id, imageUri: memory.imageUri, authorName: author[0]?.displayName ?? "Partecipante", capturedAt: memory.capturedAt, reminderTitle: null });
 });
 
 export default router;

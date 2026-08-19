@@ -25,12 +25,12 @@ export default function CaptureScreen() {
       if (!result.granted && !result.canAskAgain) Alert.alert('Fotocamera non disponibile', 'Abilita l’accesso alla fotocamera dalle impostazioni.', [{ text: 'Apri impostazioni', onPress: () => void Linking.openSettings() }, { text: 'Annulla', style: 'cancel' }]);
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.9, allowsEditing: true, aspect: [4, 5] });
-    if (!result.canceled) { setImageUri(result.assets[0].uri); void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.35, allowsEditing: true, aspect: [4, 5], base64: true });
+    if (!result.canceled) { const asset = result.assets[0]; setImageUri(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri); void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }
   };
   const gallery = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9, allowsEditing: true, aspect: [4, 5] });
-    if (!result.canceled) setImageUri(result.assets[0].uri);
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.35, allowsEditing: true, aspect: [4, 5], base64: true });
+    if (!result.canceled) { const asset = result.assets[0]; setImageUri(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri); }
   };
   const save = () => {
     if (!id || !imageUri) return;

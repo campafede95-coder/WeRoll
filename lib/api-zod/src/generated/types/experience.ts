@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ExperienceSessionStatus } from './experienceSessionStatus';
 import type { ExperienceStatus } from './experienceStatus';
 
 export interface Experience {
@@ -18,4 +19,9 @@ export interface Experience {
   status: ExperienceStatus;
   participantCount: number;
   inviteCode: string;
+  targetPhotoCount: number;
+  sessionStatus: ExperienceSessionStatus;
+  windowStart: string | null;
+  windowEnd: string | null;
+  isOwner: boolean;
 }

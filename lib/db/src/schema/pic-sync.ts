@@ -1,5 +1,5 @@
 import { createInsertSchema } from "drizzle-zod";
-import { date, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { z } from "zod/v4";
 
 export const usersTable = pgTable("pic_sync_users", {
@@ -19,6 +19,10 @@ export const experiencesTable = pgTable("pic_sync_experiences", {
   startDate: timestamp("start_date", { withTimezone: true }).notNull(),
   endDate: timestamp("end_date", { withTimezone: true }).notNull(),
   inviteCode: text("invite_code").notNull().unique(),
+  targetPhotoCount: integer("target_photo_count").notNull().default(12),
+  windowStart: text("window_start"),
+  windowEnd: text("window_end"),
+  sessionStatus: text("session_status").notNull().default("lobby"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

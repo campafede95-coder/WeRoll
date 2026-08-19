@@ -7,11 +7,17 @@
  */
 
 export interface CreateExperienceRequest {
-  /** @minLength 1 */
-  name: string;
+  name: string | null;
   description?: string | null;
   location?: string | null;
   coverImageUri?: string | null;
   startDate: Date;
   endDate: Date;
+  /**
+     * @minimum 1
+     * @maximum 100
+     */
+  targetPhotoCount?: number;
+  windowStart?: string | null;
+  windowEnd?: string | null;
 }

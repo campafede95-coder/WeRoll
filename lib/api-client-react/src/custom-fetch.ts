@@ -7,6 +7,8 @@ export type ErrorType<T = unknown> = ApiError<T>;
 export type BodyType<T> = T;
 
 export type AuthTokenGetter = () => Promise<string | null> | string | null;
+export type GuestIdentity = { id: string; displayName?: string };
+export type GuestIdentityGetter = () => Promise<GuestIdentity | null> | GuestIdentity | null;
 
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
@@ -17,6 +19,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _guestIdentityGetter: GuestIdentityGetter | null = null;
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -42,6 +45,11 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
+}
+
+/** Registers the anonymous device identity used by group-only mobile apps. */
+export function setGuestIdentityGetter(getter: GuestIdentityGetter | null): void {
+  _guestIdentityGetter = getter;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -355,6 +363,14 @@ export async function customFetch<T = unknown>(
     const token = await _authTokenGetter();
     if (token) {
       headers.set("authorization", `Bearer ${token}`);
+    }
+  }
+
+  if (_guestIdentityGetter && !headers.has("x-pic-sync-guest-id")) {
+    const guest = await _guestIdentityGetter();
+    if (guest?.id) {
+      headers.set("x-pic-sync-guest-id", guest.id);
+      if (guest.displayName) headers.set("x-pic-sync-guest-name", guest.displayName);
     }
   }
 

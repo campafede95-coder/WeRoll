@@ -30,7 +30,12 @@ export const ListExperiencesResponseItem = zod.object({
   "endDate": zod.coerce.date(),
   "status": zod.enum(['upcoming', 'ongoing', 'completed']),
   "participantCount": zod.number(),
-  "inviteCode": zod.string()
+  "inviteCode": zod.string(),
+  "targetPhotoCount": zod.number(),
+  "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
+  "windowStart": zod.string().nullable(),
+  "windowEnd": zod.string().nullable(),
+  "isOwner": zod.boolean()
 })
 export const ListExperiencesResponse = zod.array(ListExperiencesResponseItem)
 
@@ -38,16 +43,20 @@ export const ListExperiencesResponse = zod.array(ListExperiencesResponseItem)
 /**
  * @summary Create an experience
  */
+export const createExperienceBodyTargetPhotoCountMax = 100;
 
 
 
 export const CreateExperienceBody = zod.object({
-  "name": zod.string().min(1),
+  "name": zod.string().nullable(),
   "description": zod.string().nullish(),
   "location": zod.string().nullish(),
   "coverImageUri": zod.string().nullish(),
   "startDate": zod.coerce.date(),
-  "endDate": zod.coerce.date()
+  "endDate": zod.coerce.date(),
+  "targetPhotoCount": zod.number().min(1).max(createExperienceBodyTargetPhotoCountMax).optional(),
+  "windowStart": zod.string().nullish(),
+  "windowEnd": zod.string().nullish()
 })
 
 export const CreateExperienceResponse = zod.object({
@@ -60,7 +69,12 @@ export const CreateExperienceResponse = zod.object({
   "endDate": zod.coerce.date(),
   "status": zod.enum(['upcoming', 'ongoing', 'completed']),
   "participantCount": zod.number(),
-  "inviteCode": zod.string()
+  "inviteCode": zod.string(),
+  "targetPhotoCount": zod.number(),
+  "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
+  "windowStart": zod.string().nullable(),
+  "windowEnd": zod.string().nullable(),
+  "isOwner": zod.boolean()
 })
 
 
@@ -85,7 +99,12 @@ export const JoinExperienceResponse = zod.object({
   "endDate": zod.coerce.date(),
   "status": zod.enum(['upcoming', 'ongoing', 'completed']),
   "participantCount": zod.number(),
-  "inviteCode": zod.string()
+  "inviteCode": zod.string(),
+  "targetPhotoCount": zod.number(),
+  "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
+  "windowStart": zod.string().nullable(),
+  "windowEnd": zod.string().nullable(),
+  "isOwner": zod.boolean()
 })
 
 
@@ -106,7 +125,12 @@ export const GetExperienceResponse = zod.object({
   "endDate": zod.coerce.date(),
   "status": zod.enum(['upcoming', 'ongoing', 'completed']),
   "participantCount": zod.number(),
-  "inviteCode": zod.string()
+  "inviteCode": zod.string(),
+  "targetPhotoCount": zod.number(),
+  "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
+  "windowStart": zod.string().nullable(),
+  "windowEnd": zod.string().nullable(),
+  "isOwner": zod.boolean()
 }).and(zod.object({
   "participants": zod.array(zod.object({
   "id": zod.string(),
@@ -136,16 +160,20 @@ export const UpdateExperienceParams = zod.object({
   "experienceId": zod.coerce.string()
 })
 
+export const updateExperienceBodyTargetPhotoCountMax = 100;
 
 
 
 export const UpdateExperienceBody = zod.object({
-  "name": zod.string().min(1),
+  "name": zod.string().nullable(),
   "description": zod.string().nullish(),
   "location": zod.string().nullish(),
   "coverImageUri": zod.string().nullish(),
   "startDate": zod.coerce.date(),
-  "endDate": zod.coerce.date()
+  "endDate": zod.coerce.date(),
+  "targetPhotoCount": zod.number().min(1).max(updateExperienceBodyTargetPhotoCountMax).optional(),
+  "windowStart": zod.string().nullish(),
+  "windowEnd": zod.string().nullish()
 })
 
 export const UpdateExperienceResponse = zod.object({
@@ -158,7 +186,12 @@ export const UpdateExperienceResponse = zod.object({
   "endDate": zod.coerce.date(),
   "status": zod.enum(['upcoming', 'ongoing', 'completed']),
   "participantCount": zod.number(),
-  "inviteCode": zod.string()
+  "inviteCode": zod.string(),
+  "targetPhotoCount": zod.number(),
+  "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
+  "windowStart": zod.string().nullable(),
+  "windowEnd": zod.string().nullable(),
+  "isOwner": zod.boolean()
 })
 
 
@@ -184,6 +217,121 @@ export const CreateReminderResponse = zod.object({
   "message": zod.string().nullish(),
   "scheduledAt": zod.coerce.date()
 })
+
+
+/**
+ * @summary Update a scheduled reminder
+ */
+export const UpdateReminderParams = zod.object({
+  "experienceId": zod.coerce.string(),
+  "reminderId": zod.coerce.string()
+})
+
+
+
+
+export const UpdateReminderBody = zod.object({
+  "title": zod.string().min(1),
+  "message": zod.string().nullish(),
+  "scheduledAt": zod.coerce.date()
+})
+
+export const UpdateReminderResponse = zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "message": zod.string().nullish(),
+  "scheduledAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Start the reminder session
+ */
+export const StartExperienceParams = zod.object({
+  "experienceId": zod.coerce.string()
+})
+
+export const StartExperienceResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "location": zod.string().nullish(),
+  "coverImageUri": zod.string().nullish(),
+  "startDate": zod.coerce.date(),
+  "endDate": zod.coerce.date(),
+  "status": zod.enum(['upcoming', 'ongoing', 'completed']),
+  "participantCount": zod.number(),
+  "inviteCode": zod.string(),
+  "targetPhotoCount": zod.number(),
+  "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
+  "windowStart": zod.string().nullable(),
+  "windowEnd": zod.string().nullable(),
+  "isOwner": zod.boolean()
+}).and(zod.object({
+  "participants": zod.array(zod.object({
+  "id": zod.string(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish()
+})),
+  "reminders": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "message": zod.string().nullish(),
+  "scheduledAt": zod.coerce.date()
+})),
+  "memories": zod.array(zod.object({
+  "id": zod.string(),
+  "imageUri": zod.string(),
+  "authorName": zod.string(),
+  "capturedAt": zod.coerce.date(),
+  "reminderTitle": zod.string().nullish()
+}))
+}))
+
+
+/**
+ * @summary Close the reminder session
+ */
+export const CloseExperienceParams = zod.object({
+  "experienceId": zod.coerce.string()
+})
+
+export const CloseExperienceResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "location": zod.string().nullish(),
+  "coverImageUri": zod.string().nullish(),
+  "startDate": zod.coerce.date(),
+  "endDate": zod.coerce.date(),
+  "status": zod.enum(['upcoming', 'ongoing', 'completed']),
+  "participantCount": zod.number(),
+  "inviteCode": zod.string(),
+  "targetPhotoCount": zod.number(),
+  "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
+  "windowStart": zod.string().nullable(),
+  "windowEnd": zod.string().nullable(),
+  "isOwner": zod.boolean()
+}).and(zod.object({
+  "participants": zod.array(zod.object({
+  "id": zod.string(),
+  "displayName": zod.string(),
+  "avatarUrl": zod.string().nullish()
+})),
+  "reminders": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "message": zod.string().nullish(),
+  "scheduledAt": zod.coerce.date()
+})),
+  "memories": zod.array(zod.object({
+  "id": zod.string(),
+  "imageUri": zod.string(),
+  "authorName": zod.string(),
+  "capturedAt": zod.coerce.date(),
+  "reminderTitle": zod.string().nullish()
+}))
+}))
 
 
 /**

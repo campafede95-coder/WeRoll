@@ -18,6 +18,15 @@ export const ExperienceStatus = {
   completed: 'completed',
 } as const;
 
+export type ExperienceSessionStatus = typeof ExperienceSessionStatus[keyof typeof ExperienceSessionStatus];
+
+
+export const ExperienceSessionStatus = {
+  lobby: 'lobby',
+  active: 'active',
+  closed: 'closed',
+} as const;
+
 export interface Experience {
   id: string;
   name: string;
@@ -29,6 +38,11 @@ export interface Experience {
   status: ExperienceStatus;
   participantCount: number;
   inviteCode: string;
+  targetPhotoCount: number;
+  sessionStatus: ExperienceSessionStatus;
+  windowStart: string | null;
+  windowEnd: string | null;
+  isOwner: boolean;
 }
 
 export interface Participant {
@@ -59,13 +73,19 @@ export type ExperienceDetail = Experience & {
 };
 
 export interface CreateExperienceRequest {
-  /** @minLength 1 */
-  name: string;
+  name: string | null;
   description?: string | null;
   location?: string | null;
   coverImageUri?: string | null;
   startDate: string;
   endDate: string;
+  /**
+     * @minimum 1
+     * @maximum 100
+     */
+  targetPhotoCount?: number;
+  windowStart?: string | null;
+  windowEnd?: string | null;
 }
 
 export interface JoinExperienceRequest {

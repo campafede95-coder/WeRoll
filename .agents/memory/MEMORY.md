@@ -1,0 +1,1 @@
+- [Pic Sync photo persistence](photo-persistence.md) — MVP shares compressed image data directly; migrate to object storage before scaling albums.

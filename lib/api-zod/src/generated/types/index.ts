@@ -11,6 +11,7 @@ export * from './createMemoryRequest';
 export * from './createReminderRequest';
 export * from './experience';
 export * from './experienceDetail';
+export * from './experienceSessionStatus';
 export * from './experienceStatus';
 export * from './healthStatus';
 export * from './joinExperienceRequest';

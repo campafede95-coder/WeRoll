@@ -124,6 +124,57 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Reminder" }
+  /experiences/{experienceId}/reminders/{reminderId}:
+    patch:
+      operationId: updateReminder
+      tags: [experiences]
+      summary: Update a scheduled reminder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+        - name: reminderId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReminderRequest" }
+      responses:
+        "200":
+          description: Updated reminder
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reminder" }
+  /experiences/{experienceId}/start:
+    post:
+      operationId: startExperience
+      tags: [experiences]
+      summary: Start the reminder session
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Started experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExperienceDetail" }
+  /experiences/{experienceId}/close:
+    post:
+      operationId: closeExperience
+      tags: [experiences]
+      summary: Close the reminder session
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Closed experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExperienceDetail" }
   /experiences/{experienceId}/memories:
     post:
       operationId: createMemory
@@ -164,7 +215,7 @@ components:
         - status
     Experience:
       type: object
-      required: [id, name, startDate, endDate, status, participantCount, inviteCode]
+      required: [id, name, startDate, endDate, status, participantCount, inviteCode, targetPhotoCount, sessionStatus, windowStart, windowEnd, isOwner]
       properties:
         id: { type: string }
         name: { type: string }
@@ -176,6 +227,11 @@ components:
         status: { type: string, enum: [upcoming, ongoing, completed] }
         participantCount: { type: number }
         inviteCode: { type: string }
+        targetPhotoCount: { type: number }
+        sessionStatus: { type: string, enum: [lobby, active, closed] }
+        windowStart: { type: string, nullable: true }
+        windowEnd: { type: string, nullable: true }
+        isOwner: { type: boolean }
     ExperienceDetail:
       allOf:
         - $ref: "#/components/schemas/Experience"
@@ -219,12 +275,15 @@ components:
       type: object
       required: [name, startDate, endDate]
       properties:
-        name: { type: string, minLength: 1 }
+        name: { type: string, nullable: true }
         description: { type: string, nullable: true }
         location: { type: string, nullable: true }
         coverImageUri: { type: string, nullable: true }
         startDate: { type: string, format: date-time }
         endDate: { type: string, format: date-time }
+        targetPhotoCount: { type: number, minimum: 1, maximum: 100 }
+        windowStart: { type: string, nullable: true }
+        windowEnd: { type: string, nullable: true }
     JoinExperienceRequest:
       type: object
       required: [inviteCode]

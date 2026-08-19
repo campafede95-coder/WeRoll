@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { PropsWithChildren, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -11,11 +11,13 @@ import {
   Inter_700Bold,
   useFonts,
 } from '@expo-google-fonts/inter';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { ClerkLoaded, ClerkProvider, useAuth } from '@clerk/expo';
-import { tokenCache } from '@clerk/expo/token-cache';
-import { setAuthTokenGetter, setBaseUrl } from '@workspace/api-client-react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
+import { ActivityIndicator, View } from 'react-native';
+import { setBaseUrl, setGuestIdentityGetter } from '@workspace/api-client-react';
+import { useColors } from '@/hooks/useColors';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -23,26 +25,30 @@ const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
 
 const queryClient = new QueryClient();
-const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY ?? '';
-const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
-
-function ApiAuthBridge() {
-  const { getToken } = useAuth();
+function GuestIdentityBootstrap({ children }: PropsWithChildren) {
+  const [ready, setReady] = useState(false);
+  const colors = useColors();
   useEffect(() => {
-    setAuthTokenGetter(() => getToken());
-    return () => setAuthTokenGetter(null);
-  }, [getToken]);
-  return null;
+    const prepare = async () => {
+      const existing = await AsyncStorage.getItem('pic-sync-guest-id');
+      const id = existing ?? `guest-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      if (!existing) await AsyncStorage.setItem('pic-sync-guest-id', id);
+      setGuestIdentityGetter(() => ({ id, displayName: 'Partecipante' }));
+      setReady(true);
+    };
+    void prepare();
+    return () => setGuestIdentityGetter(null);
+  }, []);
+  if (!ready) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}><ActivityIndicator color={colors.primary} /></View>;
+  return <>{children}</>;
 }
 
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false, headerBackTitle: 'Indietro' }}>
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="index" />
       <Stack.Screen name="experience/create" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/[id]" />
-      <Stack.Screen name="experience/[id]/reminder" options={{ presentation: 'modal' }} />
       <Stack.Screen name="capture/[id]" />
     </Stack>
   );
@@ -62,22 +68,27 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const experienceId = response.notification.request.content.data?.experienceId;
+      if (typeof experienceId === 'string') router.push(`/capture/${experienceId}` as never);
+    });
+    return () => subscription.remove();
+  }, []);
+
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache} proxyUrl={proxyUrl}>
-      <ClerkLoaded>
-        <SafeAreaProvider>
-          <ErrorBoundary>
-            <QueryClientProvider client={queryClient}>
-              <ApiAuthBridge />
-              <GestureHandlerRootView style={{ flex: 1 }}>
-                <KeyboardProvider><RootLayoutNav /></KeyboardProvider>
-              </GestureHandlerRootView>
-            </QueryClientProvider>
-          </ErrorBoundary>
-        </SafeAreaProvider>
-      </ClerkLoaded>
-    </ClerkProvider>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <GuestIdentityBootstrap>
+            <GestureHandlerRootView style={{ flex: 1 }}>
+              <KeyboardProvider><RootLayoutNav /></KeyboardProvider>
+            </GestureHandlerRootView>
+          </GuestIdentityBootstrap>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </SafeAreaProvider>
   );
 }
