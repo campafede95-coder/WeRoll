@@ -33,7 +33,7 @@ function GuestIdentityBootstrap({ children }: PropsWithChildren) {
       const existing = await AsyncStorage.getItem('pic-sync-guest-id');
       const id = existing ?? `guest-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       if (!existing) await AsyncStorage.setItem('pic-sync-guest-id', id);
-      setGuestIdentityGetter(() => ({ id, displayName: 'Partecipante' }));
+      setGuestIdentityGetter(async () => ({ id, displayName: (await AsyncStorage.getItem('pic-sync-guest-name')) || 'Partecipante' }));
       setReady(true);
     };
     void prepare();
@@ -47,6 +47,7 @@ function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false, headerBackTitle: 'Indietro' }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="join" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/create" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/[id]" />
       <Stack.Screen name="capture/[id]" />

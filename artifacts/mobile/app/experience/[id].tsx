@@ -6,22 +6,40 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Modal, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
-import { AppHeader, AvatarStack, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface, formatDateTime } from '@/components/AppUI';
+import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
 });
 
-function timeFromDate(value: string) {
-  return new Date(value).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+function partsFor(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
+  const get = (kind: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === kind)?.value);
+  return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour'), minute: get('minute') };
 }
+
+function dateAtGroupTime(reference: string, hour: number, minute: number, timeZone: string) {
+  const current = partsFor(new Date(reference), timeZone);
+  const intended = Date.UTC(current.year, current.month - 1, current.day, hour, minute);
+  const provisional = new Date(intended);
+  const represented = partsFor(provisional, timeZone);
+  const offset = Date.UTC(represented.year, represented.month - 1, represented.day, represented.hour, represented.minute) - provisional.getTime();
+  return new Date(intended - offset);
+}
+
+function timeFromDate(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat('it-IT', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value));
+}
+
+function toMinutes(time?: string | null) {
+  if (!time) return 0;
+  const [hour, minute] = time.split(':').map(Number);
+  return hour * 60 + minute;
+}
+
+type EditingReminder = { id: string; hour: number; minute: number } | null;
 
 export default function GroupSessionScreen() {
   const colors = useColors();
@@ -32,7 +50,8 @@ export default function GroupSessionScreen() {
   const start = useStartExperience();
   const close = useCloseExperience();
   const updateReminder = useUpdateReminder();
-  const [editing, setEditing] = useState<{ id: string; title: string; time: string } | null>(null);
+  const [editing, setEditing] = useState<EditingReminder>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const group = query.data;
   const nextReminder = useMemo(() => group?.reminders.find((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now()), [group?.reminders]);
 
@@ -43,137 +62,114 @@ export default function GroupSessionScreen() {
       if (await AsyncStorage.getItem(scheduledKey)) return;
       const permission = await Notifications.getPermissionsAsync();
       if (!permission.granted) return;
-      const identifiers = await Promise.all(group.reminders
-        .filter((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now())
-        .map((reminder) => Notifications.scheduleNotificationAsync({
-          content: {
-            title: reminder.title,
-            body: 'Hai 15 minuti per scattare questo ricordo.',
-            sound: 'default',
-            data: { experienceId: group.id },
-          },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(reminder.scheduledAt) },
-        })));
+      const identifiers = await Promise.all(group.reminders.filter((reminder) => new Date(reminder.scheduledAt).getTime() > Date.now()).map((reminder) => Notifications.scheduleNotificationAsync({
+        content: { title: reminder.title, body: 'Hai 15 minuti per scattare questo ricordo.', sound: 'default', data: { experienceId: group.id } },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(reminder.scheduledAt) },
+      })));
       await AsyncStorage.setItem(scheduledKey, JSON.stringify(identifiers));
     };
     void schedule();
   }, [group]);
 
-  const startSession = () => {
-    if (!id) return;
-    start.mutate({ experienceId: id }, { onSuccess: () => void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(id) }) });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(id) });
+  const enableNotifications = async () => {
+    const current = await Notifications.getPermissionsAsync();
+    const permission = current.granted ? current : await Notifications.requestPermissionsAsync();
+    setNotificationsEnabled(permission.granted);
   };
+  const startSession = () => { if (id) start.mutate({ experienceId: id }, { onSuccess: refresh }); };
   const closeSession = () => {
     if (!id) return;
-    close.mutate({ experienceId: id }, {
-      onSuccess: async () => {
-        const raw = await AsyncStorage.getItem(`pic-sync-scheduled-${id}`);
-        const identifiers: string[] = raw ? JSON.parse(raw) : [];
-        await Promise.all(identifiers.map((identifier) => Notifications.cancelScheduledNotificationAsync(identifier)));
-        await AsyncStorage.removeItem(`pic-sync-scheduled-${id}`);
-        void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(id) });
-      },
-    });
+    close.mutate({ experienceId: id }, { onSuccess: async () => {
+      const raw = await AsyncStorage.getItem(`pic-sync-scheduled-${id}`);
+      await Promise.all((raw ? JSON.parse(raw) : []).map((notificationId: string) => Notifications.cancelScheduledNotificationAsync(notificationId)));
+      await AsyncStorage.removeItem(`pic-sync-scheduled-${id}`);
+      refresh();
+    } });
   };
   const saveReminder = () => {
-    if (!id || !editing) return;
-    const current = group?.reminders.find((reminder) => reminder.id === editing.id);
-    if (!current || !/^\d{2}:\d{2}$/.test(editing.time)) return;
-    const date = new Date(current.scheduledAt);
-    const [hour, minute] = editing.time.split(':').map(Number);
-    date.setHours(hour, minute, 0, 0);
-    updateReminder.mutate({ experienceId: id, reminderId: editing.id, data: { title: editing.title, message: 'Hai 15 minuti per scattare questo ricordo.', scheduledAt: date.toISOString() } }, {
-      onSuccess: () => { setEditing(null); void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(id) }); },
-    });
+    if (!group || !editing || !id) return;
+    const reminder = group.reminders.find((item) => item.id === editing.id);
+    if (!reminder) return;
+    updateReminder.mutate({
+      experienceId: id,
+      reminderId: reminder.id,
+      data: { title: reminder.title, message: reminder.message, scheduledAt: dateAtGroupTime(reminder.scheduledAt, editing.hour, editing.minute, group.timeZone).toISOString() },
+    }, { onSuccess: () => { setEditing(null); refresh(); } });
   };
 
   if (query.isLoading) return <Screen><AppHeader title="Gruppo" back /><SkeletonList /></Screen>;
   if (query.isError || !group) return <Screen><AppHeader title="Gruppo" back /><ErrorState onRetry={() => void query.refetch()} /></Screen>;
 
   if (group.sessionStatus === 'closed') {
-    return (
-      <Screen>
-        <AppHeader title="Album finale" back />
-        <Text style={[styles.eyebrow, { color: colors.primary }]}>SESSIONE CONCLUSA</Text>
-        <Text style={[styles.title, { color: colors.foreground }]}>Tutti i vostri{'\n'}ricordi insieme.</Text>
-        <Text style={[styles.body, { color: colors.mutedForeground }]}>{group.memories.length} foto raccolte durante l&apos;avventura.</Text>
-        {group.memories.length ? <View style={styles.album}>{group.memories.map((memory) => <View key={memory.id} style={styles.memory}><Image source={{ uri: memory.imageUri }} contentFit="cover" style={styles.memoryImage} /><Text numberOfLines={1} style={[styles.memoryAuthor, { color: colors.foreground }]}>{memory.authorName}</Text></View>)}</View> : <EmptyState icon="image" title="Nessuna foto ancora" body="Le foto scattate verranno raccolte qui." />}
-        <PrimaryButton label="Condividi l'album" icon="share-2" onPress={() => void Share.share({ message: `Album Pic Sync · ${group.name} · ${group.memories.length} ricordi raccolti.` })} style={{ marginTop: 22 }} />
-      </Screen>
-    );
+    return <Screen><AppHeader title="Album finale" back /><Text style={[styles.eyebrow, { color: colors.primary }]}>SESSIONE CONCLUSA</Text><Text style={[styles.title, { color: colors.foreground }]}>Tutti i vostri{'\n'}ricordi insieme.</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{group.memories.length} foto raccolte durante l&apos;avventura.</Text>{group.memories.length ? <View style={styles.album}>{group.memories.map((memory) => <View key={memory.id} style={styles.memory}><Image source={{ uri: memory.imageUri }} contentFit="cover" style={styles.memoryImage} /><Text numberOfLines={1} style={[styles.memoryAuthor, { color: colors.foreground }]}>{memory.authorName}</Text></View>)}</View> : <EmptyState icon="image" title="Nessuna foto ancora" body="Le foto scattate verranno raccolte qui." />}<PrimaryButton label="Condividi l'album" icon="share-2" onPress={() => void Share.share({ message: `Album Pic Sync · ${group.name} · ${group.memories.length} ricordi raccolti.` })} style={{ marginTop: 22 }} /></Screen>;
   }
+
+  const hours = Array.from({ length: Math.floor(toMinutes(group.windowEnd) / 60) - Math.floor(toMinutes(group.windowStart) / 60) + 1 }, (_, index) => Math.floor(toMinutes(group.windowStart) / 60) + index);
+  const minuteOptions = editing ? Array.from({ length: 60 }, (_, index) => index).filter((minute) => {
+    const value = editing.hour * 60 + minute;
+    return value >= toMinutes(group.windowStart) && value <= toMinutes(group.windowEnd);
+  }) : [];
+  const waitingRoom = group.sessionStatus === 'lobby' && !group.isOwner;
 
   return (
     <Screen>
-      <AppHeader title={group.sessionStatus === 'active' ? 'Sessione attiva' : 'Imposta sveglie'} back action={<View style={styles.people}><Feather name="users" size={18} color={colors.mutedForeground} /><Text style={[styles.peopleText, { color: colors.foreground }]}>{group.participantCount}</Text></View>} />
+      <AppHeader title={waitingRoom ? 'In attesa' : group.sessionStatus === 'active' ? 'Sessione attiva' : 'Imposta sveglie'} back action={<View style={styles.people}><Feather name="users" size={18} color={colors.mutedForeground} /><Text style={[styles.peopleText, { color: colors.foreground }]}>{group.participantCount}</Text></View>} />
       <Surface style={styles.summary}>
-        <View style={styles.summaryLine}><Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>Codice</Text><Text style={[styles.summaryValue, { color: colors.primary }]}>{group.inviteCode}</Text></View>
-        <View style={styles.summaryLine}><Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>Fascia oraria</Text><Text style={[styles.summaryValue, { color: colors.foreground }]}>{group.windowStart} – {group.windowEnd}</Text></View>
-        <View style={styles.summaryLine}><Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>Foto totali</Text><Text style={[styles.summaryValue, { color: colors.foreground }]}>{group.targetPhotoCount}</Text></View>
-        <View style={styles.summaryLine}><Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>Partecipanti</Text><Text style={[styles.summaryValue, { color: colors.foreground }]}>{group.participantCount}</Text></View>
+        <Summary label="Codice" value={group.inviteCode} accent />
+        <Summary label="Fascia oraria" value={`${group.windowStart} – ${group.windowEnd}`} />
+        <Summary label="Foto totali" value={String(group.targetPhotoCount)} />
+        <Summary label="Partecipanti" value={String(group.participantCount)} />
       </Surface>
 
-      {group.sessionStatus === 'lobby' ? (
+      {waitingRoom ? (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Lobby — in attesa{'\n'}dei partecipanti</Text>
-          <Text style={[styles.body, { color: colors.mutedForeground }]}>Condividi il codice. Le {group.reminders.length} sveglie sono già distribuite nella fascia scelta e puoi cambiarle singolarmente.</Text>
-          <Surface style={styles.participants}><AvatarStack participants={group.participants} count={group.participantCount} /><Text style={[styles.participantText, { color: colors.foreground }]}>{group.participantCount === 1 ? 'Organizzatore · tu' : `${group.participantCount} partecipanti collegati`}</Text></Surface>
-          <Text style={[styles.listTitle, { color: colors.foreground }]}>Sveglie</Text>
-          <View style={styles.reminderList}>{group.reminders.map((reminder) => <Pressable key={reminder.id} disabled={!group.isOwner} onPress={() => setEditing({ id: reminder.id, title: reminder.title, time: timeFromDate(reminder.scheduledAt) })} style={[styles.reminder, { borderColor: colors.border, backgroundColor: colors.card }]}><View style={[styles.reminderTime, { backgroundColor: colors.secondary }]}><Text style={[styles.reminderHour, { color: colors.foreground }]}>{timeFromDate(reminder.scheduledAt)}</Text></View><Text style={[styles.reminderTitle, { color: colors.foreground }]}>{reminder.title}</Text>{group.isOwner ? <Feather name="edit-3" size={16} color={colors.primary} /> : null}</Pressable>)}</View>
-          {group.isOwner ? <PrimaryButton label="Avvia sessione" icon="play" onPress={startSession} loading={start.isPending} style={{ marginTop: 23 }} /> : <Surface style={styles.waiting}><Feather name="clock" size={20} color={colors.primary} /><Text style={[styles.waitingText, { color: colors.foreground }]}>In attesa che l&apos;organizzatore avvii la sessione.</Text></Surface>}
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>In attesa dell&apos;organizzatore</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>Sei nel gruppo! Le sveglie sono a sorpresa — riceverai una notifica quando arriva il momento di scattare.</Text>
+          <View style={styles.roster}>{group.participants.map((participant) => <Surface key={participant.id} style={styles.person}><Text style={[styles.personName, { color: colors.foreground }]}>{participant.displayName}{participant.isOrganizer ? ' ✨' : ''}</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{participant.isOrganizer ? 'Organizzatore' : 'tu'}</Text></Surface>)}</View>
+          <PrimaryButton label={notificationsEnabled ? 'Avvisi abilitati' : 'Abilita avvisi'} icon="bell" variant="quiet" onPress={() => void enableNotifications()} style={{ marginTop: 26 }} />
+          <View style={styles.waitNote}><Text style={[styles.waitEmoji]}>⌛</Text><Text style={[styles.waitText, { color: colors.mutedForeground }]}>Attendi che l&apos;organizzatore avvii la sessione…</Text></View>
+        </>
+      ) : group.sessionStatus === 'lobby' ? (
+        <>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Prepara le sveglie</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>Tocca un orario per modificarlo. Ogni sveglia resta sempre nella fascia {group.windowStart} – {group.windowEnd}.</Text>
+          <Text style={[styles.listTitle, { color: colors.foreground }]}>Sveglie programmate</Text>
+          <View style={styles.reminderList}>{group.reminders.map((reminder) => <Pressable key={reminder.id} accessibilityRole="button" accessibilityLabel={`Modifica sveglia delle ${timeFromDate(reminder.scheduledAt, group.timeZone)}`} onPress={() => { const current = partsFor(new Date(reminder.scheduledAt), group.timeZone); setEditing({ id: reminder.id, hour: current.hour, minute: current.minute }); }} style={[styles.reminder, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="clock" size={23} color={colors.primary} /><Text style={[styles.reminderHour, { color: colors.foreground }]}>{timeFromDate(reminder.scheduledAt, group.timeZone)}</Text><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>)}</View>
+          <Text style={[styles.rosterTitle, { color: colors.foreground }]}>Partecipanti ({group.participantCount})</Text>
+          <View style={styles.roster}>{group.participants.map((participant) => <Surface key={participant.id} style={styles.person}><Text style={[styles.personName, { color: colors.foreground }]}>{participant.displayName}{participant.isOrganizer ? ' ✨' : ''}</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{participant.isOrganizer ? 'Organizzatore' : 'Nel gruppo'}</Text></Surface>)}</View>
+          <PrimaryButton label="Avvia sessione" icon="play" onPress={startSession} loading={start.isPending} style={{ marginTop: 24 }} />
         </>
       ) : (
         <>
-          <View style={[styles.liveBanner, { backgroundColor: colors.primary }]}><View style={[styles.liveDot, { backgroundColor: colors.accent }]} /><View style={{ flex: 1 }}><Text style={[styles.liveKicker, { color: colors.primaryForeground }]}>ADESSO IN CORSO</Text><Text style={[styles.liveTitle, { color: colors.primaryForeground }]}>{nextReminder ? `Prossimo ricordo alle ${timeFromDate(nextReminder.scheduledAt)}` : 'Tutte le sveglie sono passate'}</Text></View><Feather name="bell" size={22} color={colors.primaryForeground} /></View>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text>
-          <Text style={[styles.body, { color: colors.mutedForeground }]}>Quando suona una sveglia hai 15 minuti per scattare. Puoi catturare un ricordo anche in qualsiasi altro momento.</Text>
+          <View style={[styles.liveBanner, { backgroundColor: colors.primary }]}><View style={[styles.liveDot, { backgroundColor: colors.accent }]} /><View style={{ flex: 1 }}><Text style={[styles.liveKicker, { color: colors.primaryForeground }]}>ADESSO IN CORSO</Text><Text style={[styles.liveTitle, { color: colors.primaryForeground }]}>{nextReminder ? `Prossimo ricordo alle ${timeFromDate(nextReminder.scheduledAt, group.timeZone)}` : 'Tutte le sveglie sono passate'}</Text></View><Feather name="bell" size={22} color={colors.primaryForeground} /></View>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Quando suona una sveglia hai 15 minuti per scattare. Puoi catturare un ricordo anche in qualsiasi altro momento.</Text>
           <PrimaryButton label="Scatto libero" icon="camera" onPress={() => router.push(`/capture/${id}` as never)} style={{ marginTop: 24 }} />
-          <Surface style={styles.albumPreview}><Feather name="image" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.participantText, { color: colors.foreground }]}>Album condiviso</Text><Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>{group.memories.length} ricordi raccolti finora</Text></View><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Surface>
+          <Surface style={styles.albumPreview}><Feather name="image" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.personName, { color: colors.foreground }]}>Album condiviso</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{group.memories.length} ricordi raccolti finora</Text></View></Surface>
           {group.isOwner ? <Pressable accessibilityRole="button" accessibilityLabel="Chiudi sessione" onPress={closeSession} style={styles.closeSession}><Text style={[styles.closeText, { color: colors.destructive }]}>Chiudi sessione</Text></Pressable> : null}
         </>
       )}
+
       <Modal visible={Boolean(editing)} transparent animationType="fade" onRequestClose={() => setEditing(null)}>
-        <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}><View style={[styles.editSheet, { backgroundColor: colors.background }]}><Text style={[styles.listTitle, { color: colors.foreground }]}>Modifica sveglia</Text><TextInput value={editing?.title ?? ''} onChangeText={(title) => setEditing((value) => value ? { ...value, title } : value)} placeholder="Titolo" placeholderTextColor={colors.mutedForeground} style={[styles.editInput, { backgroundColor: colors.card, borderColor: colors.input, color: colors.foreground }]} /><TextInput value={editing?.time ?? ''} onChangeText={(time) => setEditing((value) => value ? { ...value, time } : value)} keyboardType="numbers-and-punctuation" maxLength={5} placeholder="09:00" placeholderTextColor={colors.mutedForeground} style={[styles.editInput, { backgroundColor: colors.card, borderColor: colors.input, color: colors.foreground }]} /><PrimaryButton label="Salva sveglia" icon="check" onPress={saveReminder} loading={updateReminder.isPending} /><Pressable onPress={() => setEditing(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable></View></View>
+        <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}><View style={[styles.pickerSheet, { backgroundColor: colors.background }]}><Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text><Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>Tra {group.windowStart} e {group.windowEnd}</Text><View style={[styles.picker, { borderColor: colors.border }]}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>{hours.map((hour) => <Pressable key={hour} onPress={() => setEditing((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, editing?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: editing?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}</ScrollView><Text style={[styles.colon, { color: colors.foreground }]}>:</Text><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>{minuteOptions.map((minute) => <Pressable key={minute} onPress={() => setEditing((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, editing?.minute === minute && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: editing?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}</ScrollView></View><PrimaryButton label="Conferma orario" icon="check" onPress={saveReminder} loading={updateReminder.isPending} /><Pressable onPress={() => setEditing(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable></View></View>
       </Modal>
     </Screen>
   );
 }
 
+function Summary({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+  const colors = useColors();
+  return <View style={styles.summaryLine}><Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>{label}</Text><Text style={[styles.summaryValue, { color: accent ? colors.primary : colors.foreground }]}>{value}</Text></View>;
+}
+
 const styles = StyleSheet.create({
-  people: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 5 },
-  peopleText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
-  summary: { padding: 17, marginTop: 4, gap: 12 },
-  summaryLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  summaryLabel: { fontFamily: 'Inter_400Regular', fontSize: 13 },
-  summaryValue: { fontFamily: 'Inter_700Bold', fontSize: 14 },
-  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 24, lineHeight: 29, letterSpacing: -0.7, marginTop: 28 },
-  body: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 21, marginTop: 9 },
-  participants: { marginTop: 20, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  participantText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
-  listTitle: { fontFamily: 'Inter_700Bold', fontSize: 18, letterSpacing: -0.25, marginTop: 25, marginBottom: 11 },
-  reminderList: { gap: 8 },
-  reminder: { minHeight: 59, borderWidth: 1, borderRadius: 17, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 11 },
-  reminderTime: { height: 37, minWidth: 58, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 7 },
-  reminderHour: { fontFamily: 'Inter_700Bold', fontSize: 13 },
-  reminderTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 14, flex: 1 },
-  waiting: { marginTop: 23, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 15 },
-  waitingText: { fontFamily: 'Inter_500Medium', fontSize: 13, lineHeight: 19, flex: 1 },
-  liveBanner: { marginTop: 20, borderRadius: 22, padding: 17, flexDirection: 'row', alignItems: 'center', gap: 11 },
-  liveDot: { width: 10, height: 10, borderRadius: 5 },
-  liveKicker: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.4 },
-  liveTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, marginTop: 4 },
-  albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 },
-  closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 },
-  closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
-  eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 },
-  title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 },
-  album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 },
-  memory: { width: '48%' },
-  memoryImage: { aspectRatio: 0.9, borderRadius: 17 },
-  memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 },
-  modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 },
-  editSheet: { width: '100%', borderRadius: 25, padding: 21 },
-  editInput: { height: 54, borderWidth: 1, borderRadius: 15, paddingHorizontal: 15, fontFamily: 'Inter_500Medium', fontSize: 15, marginBottom: 11 },
-  cancel: { alignItems: 'center', paddingTop: 18 },
-  cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  people: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 5 }, peopleText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  summary: { padding: 17, marginTop: 4, gap: 12 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, summaryLabel: { fontFamily: 'Inter_400Regular', fontSize: 13 }, summaryValue: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  sectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 24, lineHeight: 29, letterSpacing: -0.7, marginTop: 28 }, body: { fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 21, marginTop: 9 },
+  listTitle: { fontFamily: 'Inter_700Bold', fontSize: 18, letterSpacing: -0.25, marginTop: 25, marginBottom: 11 }, reminderList: { gap: 9 }, reminder: { minHeight: 67, borderWidth: 1, borderRadius: 17, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', gap: 16 }, reminderHour: { fontFamily: 'Inter_700Bold', fontSize: 26, letterSpacing: -0.5, flex: 1 },
+  rosterTitle: { fontFamily: 'Inter_700Bold', fontSize: 17, marginTop: 27, marginBottom: 10 }, roster: { gap: 8, marginTop: 20 }, person: { minHeight: 56, paddingVertical: 11, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, personName: { fontFamily: 'Inter_700Bold', fontSize: 15 }, personRole: { fontFamily: 'Inter_400Regular', fontSize: 13 },
+  waitNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 4 }, waitEmoji: { fontSize: 16 }, waitText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
+  liveBanner: { marginTop: 20, borderRadius: 22, padding: 17, flexDirection: 'row', alignItems: 'center', gap: 11 }, liveDot: { width: 10, height: 10, borderRadius: 5 }, liveKicker: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.4 }, liveTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, marginTop: 4 }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 },
+  modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
 });

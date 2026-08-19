@@ -35,6 +35,7 @@ export const ListExperiencesResponseItem = zod.object({
   "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
   "windowStart": zod.string().nullable(),
   "windowEnd": zod.string().nullable(),
+  "timeZone": zod.string(),
   "isOwner": zod.boolean()
 })
 export const ListExperiencesResponse = zod.array(ListExperiencesResponseItem)
@@ -56,7 +57,8 @@ export const CreateExperienceBody = zod.object({
   "endDate": zod.coerce.date(),
   "targetPhotoCount": zod.number().min(1).max(createExperienceBodyTargetPhotoCountMax).optional(),
   "windowStart": zod.string().nullish(),
-  "windowEnd": zod.string().nullish()
+  "windowEnd": zod.string().nullish(),
+  "timeZone": zod.string().nullish()
 })
 
 export const CreateExperienceResponse = zod.object({
@@ -74,6 +76,7 @@ export const CreateExperienceResponse = zod.object({
   "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
   "windowStart": zod.string().nullable(),
   "windowEnd": zod.string().nullable(),
+  "timeZone": zod.string(),
   "isOwner": zod.boolean()
 })
 
@@ -83,10 +86,13 @@ export const CreateExperienceResponse = zod.object({
  */
 export const joinExperienceBodyInviteCodeMin = 4;
 
+export const joinExperienceBodyDisplayNameMax = 40;
+
 
 
 export const JoinExperienceBody = zod.object({
-  "inviteCode": zod.string().min(joinExperienceBodyInviteCodeMin)
+  "inviteCode": zod.string().min(joinExperienceBodyInviteCodeMin),
+  "displayName": zod.string().min(1).max(joinExperienceBodyDisplayNameMax)
 })
 
 export const JoinExperienceResponse = zod.object({
@@ -104,6 +110,7 @@ export const JoinExperienceResponse = zod.object({
   "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
   "windowStart": zod.string().nullable(),
   "windowEnd": zod.string().nullable(),
+  "timeZone": zod.string(),
   "isOwner": zod.boolean()
 })
 
@@ -130,12 +137,14 @@ export const GetExperienceResponse = zod.object({
   "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
   "windowStart": zod.string().nullable(),
   "windowEnd": zod.string().nullable(),
+  "timeZone": zod.string(),
   "isOwner": zod.boolean()
 }).and(zod.object({
   "participants": zod.array(zod.object({
   "id": zod.string(),
   "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish()
+  "avatarUrl": zod.string().nullish(),
+  "isOrganizer": zod.boolean()
 })),
   "reminders": zod.array(zod.object({
   "id": zod.string(),
@@ -173,7 +182,8 @@ export const UpdateExperienceBody = zod.object({
   "endDate": zod.coerce.date(),
   "targetPhotoCount": zod.number().min(1).max(updateExperienceBodyTargetPhotoCountMax).optional(),
   "windowStart": zod.string().nullish(),
-  "windowEnd": zod.string().nullish()
+  "windowEnd": zod.string().nullish(),
+  "timeZone": zod.string().nullish()
 })
 
 export const UpdateExperienceResponse = zod.object({
@@ -191,6 +201,7 @@ export const UpdateExperienceResponse = zod.object({
   "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
   "windowStart": zod.string().nullable(),
   "windowEnd": zod.string().nullable(),
+  "timeZone": zod.string(),
   "isOwner": zod.boolean()
 })
 
@@ -266,12 +277,14 @@ export const StartExperienceResponse = zod.object({
   "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
   "windowStart": zod.string().nullable(),
   "windowEnd": zod.string().nullable(),
+  "timeZone": zod.string(),
   "isOwner": zod.boolean()
 }).and(zod.object({
   "participants": zod.array(zod.object({
   "id": zod.string(),
   "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish()
+  "avatarUrl": zod.string().nullish(),
+  "isOrganizer": zod.boolean()
 })),
   "reminders": zod.array(zod.object({
   "id": zod.string(),
@@ -311,12 +324,14 @@ export const CloseExperienceResponse = zod.object({
   "sessionStatus": zod.enum(['lobby', 'active', 'closed']),
   "windowStart": zod.string().nullable(),
   "windowEnd": zod.string().nullable(),
+  "timeZone": zod.string(),
   "isOwner": zod.boolean()
 }).and(zod.object({
   "participants": zod.array(zod.object({
   "id": zod.string(),
   "displayName": zod.string(),
-  "avatarUrl": zod.string().nullish()
+  "avatarUrl": zod.string().nullish(),
+  "isOrganizer": zod.boolean()
 })),
   "reminders": zod.array(zod.object({
   "id": zod.string(),

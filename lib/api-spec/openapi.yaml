@@ -215,7 +215,7 @@ components:
         - status
     Experience:
       type: object
-      required: [id, name, startDate, endDate, status, participantCount, inviteCode, targetPhotoCount, sessionStatus, windowStart, windowEnd, isOwner]
+      required: [id, name, startDate, endDate, status, participantCount, inviteCode, targetPhotoCount, sessionStatus, windowStart, windowEnd, timeZone, isOwner]
       properties:
         id: { type: string }
         name: { type: string }
@@ -231,6 +231,7 @@ components:
         sessionStatus: { type: string, enum: [lobby, active, closed] }
         windowStart: { type: string, nullable: true }
         windowEnd: { type: string, nullable: true }
+        timeZone: { type: string }
         isOwner: { type: boolean }
     ExperienceDetail:
       allOf:
@@ -249,11 +250,12 @@ components:
               items: { $ref: "#/components/schemas/Memory" }
     Participant:
       type: object
-      required: [id, displayName]
+      required: [id, displayName, isOrganizer]
       properties:
         id: { type: string }
         displayName: { type: string }
         avatarUrl: { type: string, nullable: true }
+        isOrganizer: { type: boolean }
     Reminder:
       type: object
       required: [id, title, scheduledAt]
@@ -284,11 +286,13 @@ components:
         targetPhotoCount: { type: number, minimum: 1, maximum: 100 }
         windowStart: { type: string, nullable: true }
         windowEnd: { type: string, nullable: true }
+        timeZone: { type: string, nullable: true }
     JoinExperienceRequest:
       type: object
-      required: [inviteCode]
+      required: [inviteCode, displayName]
       properties:
         inviteCode: { type: string, minLength: 4 }
+        displayName: { type: string, minLength: 1, maxLength: 40 }
     CreateReminderRequest:
       type: object
       required: [title, scheduledAt]

@@ -17,10 +17,11 @@ function guest(req: Request, res: Response) {
 }
 
 async function ensureUser(userId: string, displayName?: string) {
+  const name = displayName?.trim().slice(0, 40) || "Partecipante";
   await db
     .insert(usersTable)
-    .values({ id: userId, displayName: displayName?.trim().slice(0, 40) || "Partecipante" })
-    .onConflictDoNothing();
+    .values({ id: userId, displayName: name })
+    .onConflictDoUpdate({ target: usersTable.id, set: { displayName: name } });
 }
 
 function statusFor(experience: typeof experiencesTable.$inferSelect) {
@@ -31,7 +32,7 @@ function statusFor(experience: typeof experiencesTable.$inferSelect) {
 
 async function serializeExperience(experience: typeof experiencesTable.$inferSelect, viewerId?: string) {
   const participants = await db
-    .select({ id: usersTable.id, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl })
+    .select({ id: usersTable.id, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl, isOrganizer: participantsTable.userId })
     .from(participantsTable)
     .innerJoin(usersTable, eq(usersTable.id, participantsTable.userId))
     .where(eq(participantsTable.experienceId, experience.id));
@@ -50,22 +51,50 @@ async function serializeExperience(experience: typeof experiencesTable.$inferSel
     sessionStatus: experience.sessionStatus as "lobby" | "active" | "closed",
     windowStart: experience.windowStart,
     windowEnd: experience.windowEnd,
+    timeZone: experience.timeZone,
     isOwner: experience.ownerId === viewerId,
   };
 }
 
-function buildReminderDates(start: string, end: string, count: number) {
+function timeParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
+}
+
+function zonedDate(base: Date, hour: number, minute: number, timeZone: string) {
+  const local = timeParts(base, timeZone);
+  const targetMs = Date.UTC(local.year, local.month - 1, local.day, hour, minute, 0);
+  const provisional = new Date(targetMs);
+  const represented = timeParts(provisional, timeZone);
+  const offsetMs = Date.UTC(represented.year, represented.month - 1, represented.day, represented.hour, represented.minute) - provisional.getTime();
+  return new Date(targetMs - offsetMs);
+}
+
+function timeToMinutes(time: string) {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function isWithinWindow(date: Date, experience: typeof experiencesTable.$inferSelect) {
+  if (!experience.windowStart || !experience.windowEnd) return true;
+  const local = timeParts(date, experience.timeZone);
+  const minutes = local.hour * 60 + local.minute;
+  return minutes >= timeToMinutes(experience.windowStart) && minutes <= timeToMinutes(experience.windowEnd);
+}
+
+function buildReminderDates(start: string, end: string, count: number, timeZone: string) {
   const [startHour, startMinute] = start.split(":").map(Number);
   const [endHour, endMinute] = end.split(":").map(Number);
   const now = new Date();
-  const first = new Date(now);
-  first.setHours(startHour || 9, startMinute || 0, 0, 0);
-  const last = new Date(now);
-  last.setHours(endHour || 18, endMinute || 0, 0, 0);
-  if (last <= first) last.setDate(last.getDate() + 1);
+  let first = zonedDate(now, startHour || 9, startMinute || 0, timeZone);
+  let last = zonedDate(now, endHour || 18, endMinute || 0, timeZone);
+  if (last <= first) last = zonedDate(new Date(now.getTime() + 86_400_000), endHour || 18, endMinute || 0, timeZone);
   if (last < now) {
-    first.setDate(first.getDate() + 1);
-    last.setDate(last.getDate() + 1);
+    first = zonedDate(new Date(now.getTime() + 86_400_000), startHour || 9, startMinute || 0, timeZone);
+    last = zonedDate(new Date(now.getTime() + 86_400_000), endHour || 18, endMinute || 0, timeZone);
   }
   const span = last.getTime() - first.getTime();
   return Array.from({ length: count }, (_, index) => {
@@ -117,6 +146,7 @@ router.post("/", async (req, res) => {
     targetPhotoCount: z.coerce.number().int().min(1).max(36).default(12),
     windowStart: z.string().regex(/^\d{2}:\d{2}$/).nullish(),
     windowEnd: z.string().regex(/^\d{2}:\d{2}$/).nullish(),
+    timeZone: z.string().min(1).max(80).nullish(),
   }).parse(req.body);
   await ensureUser(userId, req.header("x-pic-sync-guest-name") ?? undefined);
   const experience = {
@@ -132,12 +162,13 @@ router.post("/", async (req, res) => {
     targetPhotoCount: body.targetPhotoCount,
     windowStart: body.windowStart ?? "09:00",
     windowEnd: body.windowEnd ?? "18:00",
+    timeZone: body.timeZone ?? "Europe/Rome",
     sessionStatus: "lobby",
     createdAt: new Date(),
   };
   await db.insert(experiencesTable).values(experience);
   await db.insert(participantsTable).values({ id: id(), experienceId: experience.id, userId });
-  const reminderDates = buildReminderDates(experience.windowStart, experience.windowEnd, experience.targetPhotoCount);
+  const reminderDates = buildReminderDates(experience.windowStart, experience.windowEnd, experience.targetPhotoCount, experience.timeZone);
   await db.insert(remindersTable).values(reminderDates.map((scheduledAt, index) => ({
     id: id(),
     experienceId: experience.id,
@@ -152,8 +183,9 @@ router.post("/", async (req, res) => {
 router.post("/join", async (req, res) => {
   const userId = guest(req, res);
   if (!userId) return;
-  const code = z.object({ inviteCode: z.string().min(4) }).parse(req.body).inviteCode.toUpperCase();
-  await ensureUser(userId, req.header("x-pic-sync-guest-name") ?? undefined);
+  const body = z.object({ inviteCode: z.string().min(4), displayName: z.string().trim().min(1).max(40) }).parse(req.body);
+  const code = body.inviteCode.toUpperCase();
+  await ensureUser(userId, body.displayName);
   const experience = await db.select().from(experiencesTable).where(eq(experiencesTable.inviteCode, code)).limit(1);
   if (!experience[0]) return res.status(404).json({ error: "Invite not found" });
   const present = await canAccess(experience[0].id, userId);
@@ -169,7 +201,7 @@ router.get("/:experienceId", async (req, res) => {
   if (!await canAccess(experience[0].id, userId)) return res.status(403).json({ error: "Forbidden" });
   const [base, participants, reminders, memoryRows] = await Promise.all([
     serializeExperience(experience[0], userId),
-    db.select({ id: usersTable.id, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl })
+    db.select({ id: usersTable.id, displayName: usersTable.displayName, avatarUrl: usersTable.avatarUrl, organizerId: participantsTable.userId })
       .from(participantsTable).innerJoin(usersTable, eq(usersTable.id, participantsTable.userId))
       .where(eq(participantsTable.experienceId, experience[0].id)),
     db.select().from(remindersTable).where(eq(remindersTable.experienceId, experience[0].id)).orderBy(remindersTable.scheduledAt),
@@ -178,7 +210,7 @@ router.get("/:experienceId", async (req, res) => {
       .leftJoin(remindersTable, eq(remindersTable.id, memoriesTable.reminderId))
       .where(eq(memoriesTable.experienceId, experience[0].id)).orderBy(desc(memoriesTable.capturedAt)),
   ]);
-  return res.json({ ...base, participants, reminders, memories: memoryRows.map(({ memory, authorName, reminderTitle }) => ({
+  return res.json({ ...base, participants: participants.map(({ organizerId, ...participant }) => ({ ...participant, isOrganizer: organizerId === experience[0].ownerId })), reminders, memories: memoryRows.map(({ memory, authorName, reminderTitle }) => ({
     id: memory.id, imageUri: memory.imageUri, authorName, capturedAt: memory.capturedAt, reminderTitle: reminderTitle ?? null,
   })) });
 });
@@ -211,6 +243,9 @@ router.patch("/:experienceId/reminders/:reminderId", async (req, res) => {
   const experience = await requireOwner(req.params.experienceId, userId, res);
   if (!experience) return;
   const body = z.object({ title: z.string().min(1), message: z.string().nullish(), scheduledAt: z.coerce.date() }).parse(req.body);
+  if (!isWithinWindow(body.scheduledAt, experience)) {
+    return res.status(400).json({ error: `Reminder must remain between ${experience.windowStart} and ${experience.windowEnd}` });
+  }
   const updated = await db.update(remindersTable).set({ ...body, message: body.message ?? null })
     .where(and(eq(remindersTable.id, req.params.reminderId), eq(remindersTable.experienceId, experience.id))).returning();
   if (!updated[0]) return res.status(404).json({ error: "Reminder not found" });

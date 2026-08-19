@@ -10,4 +10,5 @@ export interface Participant {
   id: string;
   displayName: string;
   avatarUrl?: string | null;
+  isOrganizer: boolean;
 }

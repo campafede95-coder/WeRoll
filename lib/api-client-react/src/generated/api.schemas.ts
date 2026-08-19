@@ -42,6 +42,7 @@ export interface Experience {
   sessionStatus: ExperienceSessionStatus;
   windowStart: string | null;
   windowEnd: string | null;
+  timeZone: string;
   isOwner: boolean;
 }
 
@@ -49,6 +50,7 @@ export interface Participant {
   id: string;
   displayName: string;
   avatarUrl?: string | null;
+  isOrganizer: boolean;
 }
 
 export interface Reminder {
@@ -86,11 +88,17 @@ export interface CreateExperienceRequest {
   targetPhotoCount?: number;
   windowStart?: string | null;
   windowEnd?: string | null;
+  timeZone?: string | null;
 }
 
 export interface JoinExperienceRequest {
   /** @minLength 4 */
   inviteCode: string;
+  /**
+     * @minLength 1
+     * @maxLength 40
+     */
+  displayName: string;
 }
 
 export interface CreateReminderRequest {

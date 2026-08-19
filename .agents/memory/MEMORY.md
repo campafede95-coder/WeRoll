@@ -1,1 +1,2 @@
 - [Pic Sync photo persistence](photo-persistence.md) — MVP shares compressed image data directly; migrate to object storage before scaling albums.
+- [Reminder time windows](reminder-time-windows.md) — group reminders are localized and bounded by the creator’s selected time range.

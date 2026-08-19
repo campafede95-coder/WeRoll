@@ -20,4 +20,5 @@ export interface CreateExperienceRequest {
   targetPhotoCount?: number;
   windowStart?: string | null;
   windowEnd?: string | null;
+  timeZone?: string | null;
 }

@@ -23,5 +23,6 @@ export interface Experience {
   sessionStatus: ExperienceSessionStatus;
   windowStart: string | null;
   windowEnd: string | null;
+  timeZone: string;
   isOwner: boolean;
 }

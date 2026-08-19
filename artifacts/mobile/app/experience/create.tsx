@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useCreateExperience } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
-import { Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { AppHeader, PrimaryButton, Surface } from '@/components/AppUI';
@@ -39,6 +40,7 @@ export default function CreateGroupScreen() {
         targetPhotoCount: photoCount,
         windowStart,
         windowEnd,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Rome',
       },
     }, {
       onSuccess: (group) => {
@@ -57,11 +59,11 @@ export default function CreateGroupScreen() {
           <View style={[styles.successIcon, { backgroundColor: colors.secondary }]}><Feather name="check" size={44} color={colors.primary} /></View>
           <Text style={[styles.successTitle, { color: colors.foreground }]}>Gruppo creato!</Text>
           <Text style={[styles.successBody, { color: colors.mutedForeground }]}>Condividi il codice con i partecipanti. Entreranno senza creare un account.</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Condividi il codice" onPress={() => void Share.share({ message: `Entra nel mio gruppo Pic Sync con il codice: ${created.inviteCode}` })} style={[styles.codeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Copia il codice" onPress={() => void Clipboard.setStringAsync(created.inviteCode)} style={[styles.codeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <Text style={[styles.code, { color: colors.foreground }]}>{created.inviteCode}</Text>
             <Feather name="copy" size={23} color={colors.primary} />
           </Pressable>
-          <Text style={[styles.copyHint, { color: colors.mutedForeground }]}>Tocca per condividere il codice</Text>
+          <Text style={[styles.copyHint, { color: colors.mutedForeground }]}>Tocca per copiare il codice</Text>
           <Surface style={styles.participantCard}><Feather name="users" size={19} color={colors.primary} /><View><Text style={[styles.participantTitle, { color: colors.foreground }]}>Partecipanti collegati (1)</Text><Text style={[styles.participantBody, { color: colors.mutedForeground }]}>Organizzatore · tu</Text></View></Surface>
         </View>
         <PrimaryButton label="Vai alla sessione" icon="arrow-right" onPress={() => router.replace(`/experience/${created.id}` as never)} style={styles.bottomButton} />

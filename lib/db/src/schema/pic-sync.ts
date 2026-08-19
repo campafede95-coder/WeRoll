@@ -22,6 +22,7 @@ export const experiencesTable = pgTable("pic_sync_experiences", {
   targetPhotoCount: integer("target_photo_count").notNull().default(12),
   windowStart: text("window_start"),
   windowEnd: text("window_end"),
+  timeZone: text("time_zone").notNull().default("Europe/Rome"),
   sessionStatus: text("session_status").notNull().default("lobby"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

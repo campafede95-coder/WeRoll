@@ -9,4 +9,9 @@
 export interface JoinExperienceRequest {
   /** @minLength 4 */
   inviteCode: string;
+  /**
+     * @minLength 1
+     * @maxLength 40
+     */
+  displayName: string;
 }
