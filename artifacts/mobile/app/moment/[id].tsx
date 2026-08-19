@@ -21,7 +21,7 @@ export default function PhotoMomentScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id, reminderId, scheduledAt, test, notificationId } = useLocalSearchParams<{ id: string; reminderId?: string; scheduledAt?: string; test?: string; notificationId?: string }>();
+  const { id, reminderId, scheduledAt, test, notificationId, source } = useLocalSearchParams<{ id: string; reminderId?: string; scheduledAt?: string; test?: string; notificationId?: string; source?: string }>();
   const isTest = test === 'true';
   const experience = useGetExperience(id, { query: { queryKey: getGetExperienceQueryKey(id), enabled: Boolean(id) && !isTest } }).data;
   const reminder = useMemo(() => experience?.reminders.find((item) => item.id === reminderId), [experience?.reminders, reminderId]);
@@ -49,10 +49,14 @@ export default function PhotoMomentScreen() {
         // The notification may already be dismissed by the operating system.
       }
     }
+    if (source === 'session' && router.canGoBack()) {
+      router.back();
+      return;
+    }
     router.replace({
       pathname: '/experience/[id]',
       params: {
-        id,
+        id: experience?.id ?? id,
         ...(isTest || !reminderId || !scheduledAt ? {} : { momentReminderId: reminderId, momentScheduledAt: scheduledAt }),
       },
     });

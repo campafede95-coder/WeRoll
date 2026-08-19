@@ -286,7 +286,7 @@ export default function GroupSessionScreen() {
               accessibilityLabel="Riapri il countdown"
               onPress={() => router.push({
                 pathname: '/moment/[id]',
-                params: { id, reminderId: momentReminderId, scheduledAt: momentScheduledAt },
+                params: { id: group.id, reminderId: momentReminderId, scheduledAt: momentScheduledAt, source: 'session' },
               })}
               style={[styles.momentBanner, { backgroundColor: colors.secondary }]}
             >

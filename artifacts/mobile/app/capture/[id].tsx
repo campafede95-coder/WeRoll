@@ -16,8 +16,10 @@ export default function CaptureScreen() {
   const { id, test, autoCamera, reminderId } = useLocalSearchParams<{ id: string; test?: string; autoCamera?: string; reminderId?: string }>();
   const isTest = test === 'true';
   const routeExperienceId = Array.isArray(id) ? id[0] : id;
+  const validRouteExperienceId = routeExperienceId && /^\d+-[a-z0-9]+$/i.test(routeExperienceId) ? routeExperienceId : null;
   const queryClient = useQueryClient();
-  const experience = useGetExperience(routeExperienceId, { query: { queryKey: getGetExperienceQueryKey(routeExperienceId), enabled: Boolean(routeExperienceId) } }).data;
+  const experience = useGetExperience(validRouteExperienceId ?? '', { query: { queryKey: getGetExperienceQueryKey(validRouteExperienceId ?? ''), enabled: Boolean(validRouteExperienceId) } }).data;
+  const experienceId = experience?.id ?? validRouteExperienceId;
   const mutation = useCreateMemory();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [permission, requestPermission] = ImagePicker.useCameraPermissions();
@@ -65,12 +67,12 @@ export default function CaptureScreen() {
     if (!result.canceled) { const asset = result.assets[0]; setImageUri(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri); }
   };
   const save = () => {
-    if (!routeExperienceId || !imageUri) return;
-    if (!experience?.id) {
+    if (!experienceId || !imageUri) return;
+    if (!validRouteExperienceId) {
       Alert.alert('Gruppo non disponibile', 'Riapri la sessione e prova di nuovo. La foto resta qui e non viene persa.');
       return;
     }
-    mutation.mutate({ experienceId: experience.id, data: { imageUri, capturedAt: new Date().toISOString(), reminderId: reminderId || null } }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(experience.id) }); router.replace({ pathname: '/experience/[id]', params: { id: experience.id } }); }, onError: (error) => { console.warn('Salvataggio foto fallito.', error); Alert.alert('Foto non salvata', saveErrorMessage(error)); } });
+    mutation.mutate({ experienceId, data: { imageUri, capturedAt: new Date().toISOString(), reminderId: reminderId || null } }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(experienceId) }); router.replace({ pathname: '/experience/[id]', params: { id: experienceId } }); }, onError: (error) => { console.warn('Salvataggio foto fallito.', error); Alert.alert('Foto non salvata', saveErrorMessage(error)); } });
   };
   if (openingCamera && !imageUri) {
     return <View style={[styles.openingPage, { backgroundColor: colors.foreground }]}><ActivityIndicator size="large" color={colors.primary} /><Text style={[styles.openingText, { color: colors.primaryForeground }]}>Apertura fotocamera…</Text></View>;
