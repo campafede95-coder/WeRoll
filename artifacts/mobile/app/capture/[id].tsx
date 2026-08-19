@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { useQueryClient } from '@tanstack/react-query';
 import { getGetExperienceQueryKey, useCreateMemory, useGetExperience } from '@workspace/api-client-react';
@@ -13,13 +13,14 @@ import { useColors } from '@/hooks/useColors';
 export default function CaptureScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { id, test } = useLocalSearchParams<{ id: string; test?: string }>();
+  const { id, test, autoCamera, reminderId } = useLocalSearchParams<{ id: string; test?: string; autoCamera?: string; reminderId?: string }>();
   const isTest = test === 'true';
   const queryClient = useQueryClient();
   const experience = useGetExperience(id, { query: { queryKey: getGetExperienceQueryKey(id), enabled: Boolean(id) } }).data;
   const mutation = useCreateMemory();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [permission, requestPermission] = ImagePicker.useCameraPermissions();
+  const autoCameraOpened = useRef(false);
   const capture = async () => {
     if (!permission?.granted) {
       const result = await requestPermission();
@@ -29,19 +30,24 @@ export default function CaptureScreen() {
           'Abilita l’accesso alla fotocamera dalle impostazioni per effettuare lo scatto di prova.',
           [{ text: 'Apri impostazioni', onPress: () => void Linking.openSettings() }, { text: 'Annulla', style: 'cancel' }],
         );
+        return;
       }
-      return;
     }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.35, allowsEditing: false, base64: true });
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.3, allowsEditing: false, base64: true });
     if (!result.canceled) { const asset = result.assets[0]; setImageUri(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri); void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }
   };
+  useEffect(() => {
+    if (autoCamera !== 'true' || autoCameraOpened.current || !permission) return;
+    autoCameraOpened.current = true;
+    void capture();
+  }, [autoCamera, permission]);
   const gallery = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.35, allowsEditing: false, base64: true });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.3, allowsEditing: false, base64: true });
     if (!result.canceled) { const asset = result.assets[0]; setImageUri(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri); }
   };
   const save = () => {
     if (!id || !imageUri) return;
-    mutation.mutate({ experienceId: id, data: { imageUri, capturedAt: new Date().toISOString() } }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(id) }); router.replace(`/experience/${id}` as never); }, onError: () => Alert.alert('Foto non salvata', 'Conserva lo scatto e riprova tra un momento.') });
+    mutation.mutate({ experienceId: id, data: { imageUri, capturedAt: new Date().toISOString(), reminderId: reminderId || null } }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(id) }); router.replace(`/experience/${id}` as never); }, onError: (error) => { console.warn('Salvataggio foto fallito.', error); Alert.alert('Foto non salvata', 'Controlla la connessione e riprova. La foto resta visibile in questa schermata.'); } });
   };
   return <View style={[styles.page, { backgroundColor: colors.foreground }]}><View style={styles.top}><Pressable accessibilityRole="button" accessibilityLabel="Chiudi fotocamera" onPress={() => router.back()}><Feather name="x" size={25} color={colors.primaryForeground} /></Pressable><View style={styles.topCenter}><Text style={[styles.kicker, { color: colors.accent }]}>{isTest ? 'SCATTO DI PROVA' : 'NUOVO RICORDO'}</Text><Text style={[styles.topTitle, { color: colors.primaryForeground }]}>{experience?.name || 'Esperienza'}</Text></View><View style={{ width: 25 }} /></View><View style={styles.preview}>{imageUri ? <Image source={{ uri: imageUri }} contentFit={isTest ? 'contain' : 'cover'} style={StyleSheet.absoluteFillObject} /> : <View style={[styles.emptyPreview, { backgroundColor: colors.card }]}><Feather name="camera" size={37} color={colors.primary} /><Text style={[styles.previewTitle, { color: colors.foreground }]}>{isTest ? 'Controlla l’inquadratura' : 'Fermate il momento'}</Text><Text style={[styles.previewBody, { color: colors.mutedForeground }]}>{isTest ? 'Lo scatto non entrerà nell’album.' : 'La foto entrerà nell’album di tutti.'}</Text></View>}</View><View style={styles.bottom}><View style={styles.tools}><Pressable accessibilityRole="button" accessibilityLabel="Scegli dalla galleria" onPress={gallery} style={styles.tool}><Feather name="image" size={22} color={colors.primaryForeground} /><Text style={[styles.toolLabel, { color: colors.primaryForeground }]}>Galleria</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Scatta foto" onPress={capture} style={[styles.shutter, { borderColor: colors.primaryForeground }]}><View style={[styles.shutterInner, { backgroundColor: colors.primary }]} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Ripeti scatto" onPress={() => setImageUri(null)} style={styles.tool}><Feather name="rotate-ccw" size={22} color={colors.primaryForeground} /><Text style={[styles.toolLabel, { color: colors.primaryForeground }]}>Ripeti</Text></Pressable></View>{imageUri ? <PrimaryButton label={isTest ? 'Chiudi prova' : "Aggiungi all'album"} icon={isTest ? 'x' : 'check'} onPress={isTest ? () => router.back() : save} loading={!isTest && mutation.isPending} style={{ marginTop: 20 }} /> : null}</View></View>;
 }

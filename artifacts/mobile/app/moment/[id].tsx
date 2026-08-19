@@ -41,7 +41,7 @@ export default function PhotoMomentScreen() {
     return () => clearInterval(timer);
   }, [expired]);
 
-  const closeTest = async () => {
+  const closeMoment = async () => {
     if (notificationId && Platform.OS !== 'web') {
       try {
         await Notifications.dismissNotificationAsync(notificationId);
@@ -49,11 +49,28 @@ export default function PhotoMomentScreen() {
         // The notification may already be dismissed by the operating system.
       }
     }
-    router.replace(`/experience/${id}` as never);
+    router.replace({
+      pathname: '/experience/[id]',
+      params: {
+        id,
+        ...(isTest || !reminderId || !scheduledAt ? {} : { momentReminderId: reminderId, momentScheduledAt: scheduledAt }),
+      },
+    });
   };
 
   return (
     <View style={[styles.page, { backgroundColor: colors.background, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
+      <View style={styles.topBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Chiudi countdown"
+          testID="photo-window-close"
+          onPress={() => void closeMoment()}
+          style={({ pressed }) => [styles.closeButton, { backgroundColor: colors.card }, pressed && styles.pressed]}
+        >
+          <Feather name="x" size={22} color={colors.foreground} />
+        </Pressable>
+      </View>
       <View style={styles.content}>
         <View style={[styles.iconCircle, { backgroundColor: colors.secondary }]}>
           <Feather name={expired ? 'clock' : 'camera'} size={67} color={colors.primary} />
@@ -73,7 +90,13 @@ export default function PhotoMomentScreen() {
           disabled={expired}
           onPress={() => router.push({
             pathname: '/capture/[id]',
-            params: { id, ...(isTest ? { test: 'true' } : {}) },
+            params: {
+              id,
+              autoCamera: 'true',
+              ...(isTest ? { test: 'true' } : {}),
+              ...(reminderId ? { reminderId } : {}),
+              ...(scheduledAt ? { scheduledAt } : {}),
+            },
           })}
           style={({ pressed }) => [styles.primaryAction, { backgroundColor: expired ? colors.muted : colors.primary }, pressed && !expired && styles.pressed]}
         >
@@ -85,7 +108,7 @@ export default function PhotoMomentScreen() {
             accessibilityRole="button"
             accessibilityLabel={isTest ? 'Chiudi prova' : 'Torna alla sessione'}
             testID="photo-window-dismiss"
-            onPress={isTest ? () => void closeTest() : () => router.replace(`/experience/${id}` as never)}
+            onPress={() => void closeMoment()}
             style={({ pressed }) => [styles.returnAction, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}
           >
             <Text style={[styles.returnLabel, { color: colors.foreground }]}>{isTest ? 'Chiudi prova' : 'Torna alla sessione'}</Text>
@@ -98,6 +121,8 @@ export default function PhotoMomentScreen() {
 
 const styles = StyleSheet.create({
   page: { flex: 1, paddingHorizontal: 22 },
+  topBar: { alignItems: 'flex-end' },
+  closeButton: { width: 43, height: 43, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 28 },
   iconCircle: { width: 176, height: 176, borderRadius: 88, alignItems: 'center', justifyContent: 'center' },
   title: { fontFamily: 'Inter_700Bold', fontSize: 36, lineHeight: 42, letterSpacing: -1.1, textAlign: 'center', marginTop: 42 },

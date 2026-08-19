@@ -11,6 +11,8 @@ import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList,
 import { useColors } from '@/hooks/useColors';
 import { ensurePhotoReminderChannel, PHOTO_REMINDER_CHANNEL, PHOTO_REMINDER_SOUND } from '@/constants/notifications';
 
+const PHOTO_WINDOW_MS = 15 * 60 * 1000;
+
 function partsFor(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
   const get = (kind: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === kind)?.value);
@@ -30,6 +32,11 @@ function timeFromDate(value: string, timeZone: string) {
   return new Intl.DateTimeFormat('it-IT', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value));
 }
 
+function formatCountdown(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  return `${String(Math.floor(totalSeconds / 60)).padStart(2, '0')}:${String(totalSeconds % 60).padStart(2, '0')}`;
+}
+
 function toMinutes(time?: string | null) {
   if (!time) return 0;
   const [hour, minute] = time.split(':').map(Number);
@@ -44,7 +51,7 @@ const TEST_NOTIFICATION_DELAY_SECONDS = 5;
 export default function GroupSessionScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, momentReminderId, momentScheduledAt } = useLocalSearchParams<{ id: string; momentReminderId?: string; momentScheduledAt?: string }>();
   const queryClient = useQueryClient();
   const query = useGetExperience(id, { query: { queryKey: getGetExperienceQueryKey(id), enabled: Boolean(id), refetchInterval: 5000 } });
   const start = useStartExperience();
@@ -53,8 +60,18 @@ export default function GroupSessionScreen() {
   const registerPushToken = useRegisterPushToken();
   const [editing, setEditing] = useState<EditingReminder>(null);
   const [testNotificationState, setTestNotificationState] = useState<TestNotificationState>('idle');
+  const [now, setNow] = useState(Date.now());
   const schedulingExperiences = useRef(new Set<string>());
   const group = query.data;
+  const momentEndTime = momentScheduledAt ? new Date(momentScheduledAt).getTime() + PHOTO_WINDOW_MS : 0;
+  const momentRemaining = momentEndTime > 0 ? Math.max(0, momentEndTime - now) : 0;
+  const hasActiveMoment = Boolean(momentScheduledAt) && momentRemaining > 0;
+
+  useEffect(() => {
+    if (!momentScheduledAt || !hasActiveMoment) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [hasActiveMoment, momentScheduledAt]);
 
   useEffect(() => {
     if (!group || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
@@ -263,6 +280,22 @@ export default function GroupSessionScreen() {
         </>
       ) : (
         <>
+          {hasActiveMoment ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Riapri il countdown"
+              onPress={() => router.push({
+                pathname: '/moment/[id]',
+                params: { id, reminderId: momentReminderId, scheduledAt: momentScheduledAt },
+              })}
+              style={[styles.momentBanner, { backgroundColor: colors.secondary }]}
+            >
+              <View style={[styles.momentIcon, { backgroundColor: colors.primary }]}><Feather name="camera" size={16} color={colors.primaryForeground} /></View>
+              <View style={styles.momentCopy}><Text style={[styles.momentKicker, { color: colors.primary }]}>RICORDO IN CORSO</Text><Text style={[styles.momentTitle, { color: colors.foreground }]}>Tempo rimasto</Text></View>
+              <Text style={[styles.momentCountdown, { color: colors.primary }]}>{formatCountdown(momentRemaining)}</Text>
+              <Feather name="chevron-right" size={19} color={colors.primary} />
+            </Pressable>
+          ) : null}
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Quando suona una sveglia hai 15 minuti per scattare. Puoi catturare un ricordo anche in qualsiasi altro momento.</Text>
           <PrimaryButton label="Scatto libero" icon="camera" onPress={() => router.push(`/capture/${id}` as never)} style={{ marginTop: 24 }} />
           <Surface style={styles.albumPreview}><Feather name="image" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.personName, { color: colors.foreground }]}>Album condiviso</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{group.memories.length} ricordi raccolti finora</Text></View></Surface>
@@ -289,7 +322,7 @@ const styles = StyleSheet.create({
   listTitle: { fontFamily: 'Inter_700Bold', fontSize: 18, letterSpacing: -0.25, marginTop: 25, marginBottom: 11 }, reminderList: { gap: 9 }, reminder: { minHeight: 67, borderWidth: 1, borderRadius: 17, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', gap: 16 }, reminderHour: { fontFamily: 'Inter_700Bold', fontSize: 26, letterSpacing: -0.5, flex: 1 },
   rosterTitle: { fontFamily: 'Inter_700Bold', fontSize: 17, marginTop: 27, marginBottom: 10 }, roster: { gap: 8, marginTop: 20 }, person: { minHeight: 56, paddingVertical: 11, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, personName: { fontFamily: 'Inter_700Bold', fontSize: 15 }, personRole: { fontFamily: 'Inter_400Regular', fontSize: 13 },
   waitNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 4 }, waitEmoji: { fontSize: 16 }, waitText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
-  albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  momentBanner: { marginTop: 20, minHeight: 70, borderRadius: 19, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, momentIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, momentCopy: { flex: 1 }, momentKicker: { fontFamily: 'Inter_700Bold', fontSize: 9, letterSpacing: 1.2 }, momentTitle: { fontFamily: 'Inter_500Medium', fontSize: 13, marginTop: 3 }, momentCountdown: { fontFamily: 'Inter_700Bold', fontSize: 18, fontVariant: ['tabular-nums'] }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
   testCard: { marginTop: 16, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11 }, testIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, testCopy: { flex: 1 }, testTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 }, testBody: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16, marginTop: 3 }, testButton: { minWidth: 62, minHeight: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8 }, testButtonLabel: { fontFamily: 'Inter_700Bold', fontSize: 10 }, pressed: { opacity: 0.8, transform: [{ scale: 0.96 }] },
   eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 },
   modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
