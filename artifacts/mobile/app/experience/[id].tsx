@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useRegisterPushToken, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -10,10 +11,9 @@ import { Alert, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleShe
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 import { ensurePhotoReminderChannel, PHOTO_REMINDER_CHANNEL, PHOTO_REMINDER_SOUND } from '@/constants/notifications';
+import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
-const EXPERIENCE_ID_PATTERN = /^\d+-[a-z0-9]+$/i;
-
 function partsFor(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
   const get = (kind: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === kind)?.value);
@@ -53,9 +53,7 @@ export default function GroupSessionScreen() {
   const colors = useColors();
   const router = useRouter();
   const { id, experienceId: experienceIdParam, momentReminderId, momentScheduledAt } = useLocalSearchParams<{ id: string; experienceId?: string; momentReminderId?: string; momentScheduledAt?: string }>();
-  const routeExperienceId = Array.isArray(id) ? id[0] : id;
-  const queryExperienceId = Array.isArray(experienceIdParam) ? experienceIdParam[0] : experienceIdParam;
-  const experienceId = [queryExperienceId, routeExperienceId].find((value): value is string => typeof value === 'string' && EXPERIENCE_ID_PATTERN.test(value.trim()))?.trim() ?? '';
+  const experienceId = resolveExperienceId(experienceIdParam, id);
   const queryClient = useQueryClient();
   const query = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId), refetchInterval: 5000 } });
   const start = useStartExperience();
@@ -70,6 +68,10 @@ export default function GroupSessionScreen() {
   const momentEndTime = momentScheduledAt ? new Date(momentScheduledAt).getTime() + PHOTO_WINDOW_MS : 0;
   const momentRemaining = momentEndTime > 0 ? Math.max(0, momentEndTime - now) : 0;
   const hasActiveMoment = Boolean(momentScheduledAt) && momentRemaining > 0;
+
+  useEffect(() => {
+    if (experienceId) void AsyncStorage.setItem(LAST_EXPERIENCE_ID_STORAGE_KEY, experienceId);
+  }, [experienceId]);
 
   useEffect(() => {
     if (!momentScheduledAt || !hasActiveMoment) return;

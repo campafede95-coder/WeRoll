@@ -5,22 +5,21 @@ import { getGetExperienceQueryKey, useCreateMemory, useGetExperience } from '@wo
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Screen, PrimaryButton } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
+import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
 
 const SAVE_TIMEOUT_MS = 45_000;
-const EXPERIENCE_ID_PATTERN = /^\d+-[a-z0-9]+$/i;
-
 export default function CaptureScreen() {
   const colors = useColors();
   const router = useRouter();
   const { id, experienceId: experienceIdParam, test, autoCamera, reminderId } = useLocalSearchParams<{ id: string; experienceId?: string; test?: string; autoCamera?: string; reminderId?: string }>();
   const isTest = test === 'true';
-  const routeExperienceId = Array.isArray(id) ? id[0] : id;
-  const queryExperienceId = Array.isArray(experienceIdParam) ? experienceIdParam[0] : experienceIdParam;
-  const experienceId = [queryExperienceId, routeExperienceId].find((value): value is string => typeof value === 'string' && EXPERIENCE_ID_PATTERN.test(value.trim()))?.trim() ?? '';
+  const [storedExperienceId, setStoredExperienceId] = useState('');
+  const experienceId = resolveExperienceId(experienceIdParam, id, storedExperienceId);
   const queryClient = useQueryClient();
   const experience = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId) } }).data;
   const saveControllerRef = useRef<AbortController | null>(null);
@@ -30,6 +29,13 @@ export default function CaptureScreen() {
   const [permission, requestPermission] = ImagePicker.useCameraPermissions();
   const [openingCamera, setOpeningCamera] = useState(autoCamera === 'true');
   const autoCameraOpened = useRef(false);
+  useEffect(() => {
+    if (experienceId) {
+      void AsyncStorage.setItem(LAST_EXPERIENCE_ID_STORAGE_KEY, experienceId);
+      return;
+    }
+    void AsyncStorage.getItem(LAST_EXPERIENCE_ID_STORAGE_KEY).then((value) => setStoredExperienceId(resolveExperienceId(value)));
+  }, [experienceId]);
   const capture = async (automatic = false) => {
     if (automatic) setOpeningCamera(true);
     try {

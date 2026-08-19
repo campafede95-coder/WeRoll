@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getGetExperienceQueryKey, useGetExperience } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
+import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 const TEST_PHOTO_WINDOW_MS = 30 * 1000;
-const EXPERIENCE_ID_PATTERN = /^\d+-[a-z0-9]+$/i;
-
 function formatCountdown(milliseconds: number) {
   const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -24,9 +24,7 @@ export default function PhotoMomentScreen() {
   const router = useRouter();
   const { id, experienceId: experienceIdParam, reminderId, scheduledAt, test, notificationId } = useLocalSearchParams<{ id: string; experienceId?: string; reminderId?: string; scheduledAt?: string; test?: string; notificationId?: string }>();
   const isTest = test === 'true';
-  const routeExperienceId = Array.isArray(id) ? id[0] : id;
-  const queryExperienceId = Array.isArray(experienceIdParam) ? experienceIdParam[0] : experienceIdParam;
-  const experienceId = [queryExperienceId, routeExperienceId].find((value): value is string => typeof value === 'string' && EXPERIENCE_ID_PATTERN.test(value.trim()))?.trim() ?? '';
+  const experienceId = resolveExperienceId(experienceIdParam, id);
   const experience = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId) && !isTest } }).data;
   const captureExperienceId = experience?.id ?? experienceId;
   const reminder = useMemo(() => experience?.reminders.find((item) => item.id === reminderId), [experience?.reminders, reminderId]);
@@ -63,16 +61,18 @@ export default function PhotoMomentScreen() {
       },
     });
   };
-  const openCapture = () => {
-    if (!captureExperienceId) {
+  const openCapture = async () => {
+    const savedExperienceId = captureExperienceId || resolveExperienceId(await AsyncStorage.getItem(LAST_EXPERIENCE_ID_STORAGE_KEY));
+    if (!savedExperienceId) {
+      console.warn('Il countdown non ha ricevuto un ID gruppo valido.', { id, experienceIdParam });
       Alert.alert('Countdown non disponibile', 'Torna alla sessione attiva e riapri il countdown.');
       return;
     }
     router.push({
       pathname: '/capture/[id]',
       params: {
-        id: captureExperienceId,
-        experienceId: captureExperienceId,
+        id: savedExperienceId,
+        experienceId: savedExperienceId,
         autoCamera: 'true',
         ...(isTest ? { test: 'true' } : {}),
         ...(reminderId ? { reminderId } : {}),
@@ -111,7 +111,7 @@ export default function PhotoMomentScreen() {
           accessibilityLabel={isTest ? 'Scatta foto di prova senza salvare' : 'Scatta foto'}
           testID="photo-window-capture"
           disabled={expired}
-          onPress={openCapture}
+          onPress={() => void openCapture()}
           style={({ pressed }) => [styles.primaryAction, { backgroundColor: expired ? colors.muted : colors.primary }, pressed && !expired && styles.pressed]}
         >
           <Feather name="camera" size={23} color={expired ? colors.mutedForeground : colors.primaryForeground} />
