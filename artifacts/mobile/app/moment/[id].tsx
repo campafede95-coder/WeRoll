@@ -8,6 +8,7 @@ import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
+import { getPhotoPromptForReminder } from '@/constants/photoPrompts';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 const TEST_PHOTO_WINDOW_MS = 30 * 1000;
@@ -28,6 +29,8 @@ export default function PhotoMomentScreen() {
   const experience = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId) && !isTest } }).data;
   const captureExperienceId = experience?.id ?? experienceId;
   const reminder = useMemo(() => experience?.reminders.find((item) => item.id === reminderId), [experience?.reminders, reminderId]);
+  const reminderKey = !isTest && reminderId ? `${captureExperienceId}:${reminderId}` : '';
+  const [photoPrompt] = useState(() => getPhotoPromptForReminder(reminderKey));
   const startTime = useMemo(() => {
     const value = scheduledAt || reminder?.scheduledAt;
     const parsed = value ? new Date(value).getTime() : Date.now();
@@ -101,6 +104,12 @@ export default function PhotoMomentScreen() {
         {isTest ? <View style={[styles.testPill, { backgroundColor: colors.accent }]}><Feather name="radio" size={13} color={colors.accentForeground} /><Text style={[styles.testPillText, { color: colors.accentForeground }]}>PROVA AVVISO · SOLO TU</Text></View> : null}
         <Text style={[styles.title, { color: colors.foreground }]}>{expired ? 'Tempo scaduto' : isTest ? 'Countdown di prova' : 'Scatta una foto!'}</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{expired ? 'La finestra per questo ricordo è terminata' : isTest ? 'Controlla suono e vibrazione · questa foto non sarà salvata' : 'Tempo rimasto'}</Text>
+        {photoPrompt ? (
+          <View style={[styles.promptCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="zap" size={16} color={colors.primary} />
+            <Text style={[styles.promptText, { color: colors.foreground }]}>{photoPrompt}</Text>
+          </View>
+        ) : null}
         <Text accessibilityLabel={`${formatCountdown(remaining)} rimanenti`} testID="photo-window-countdown" style={[styles.countdown, { color: expired ? colors.mutedForeground : colors.primary }]}>{formatCountdown(remaining)}</Text>
         {!isTest && reminder?.title ? <Text style={[styles.reminderTitle, { color: colors.mutedForeground }]}>{reminder.title}</Text> : null}
       </View>
@@ -141,6 +150,8 @@ const styles = StyleSheet.create({
   iconCircle: { width: 176, height: 176, borderRadius: 88, alignItems: 'center', justifyContent: 'center' },
   title: { fontFamily: 'Inter_700Bold', fontSize: 36, lineHeight: 42, letterSpacing: -1.1, textAlign: 'center', marginTop: 42 },
   subtitle: { fontFamily: 'Inter_400Regular', fontSize: 19, lineHeight: 26, textAlign: 'center', marginTop: 20 },
+  promptCard: { width: '100%', maxWidth: 360, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 13, marginTop: 20 },
+  promptText: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14, lineHeight: 20 },
   countdown: { fontFamily: 'Inter_700Bold', fontSize: 60, lineHeight: 68, letterSpacing: -2.4, marginTop: 23, fontVariant: ['tabular-nums'] },
   reminderTitle: { fontFamily: 'Inter_500Medium', fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 12 },
   testPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 99, paddingHorizontal: 12, paddingVertical: 7 },

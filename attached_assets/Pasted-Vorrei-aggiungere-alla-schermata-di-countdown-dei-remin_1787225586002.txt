@@ -1,0 +1,43 @@
+Vorrei aggiungere alla schermata di countdown dei reminder una funzione chiamata "photo prompts".
+
+Quando parte un reminder e viene mostrata la schermata di countdown, voglio che nel 30% dei casi venga mostrato anche un photo prompt motivazionale/creativo.
+
+LOGICA:
+- Ogni reminder ha il 30% di probabilità di mostrare un photo prompt.
+- Quindi, statisticamente, circa 3 reminder su 10 mostreranno una frase.
+- Non deve essere necessariamente esattamente 3 su ogni 10 reminder: usa una probabilità casuale del 30% per ogni singolo reminder.
+- Nel restante 70% dei casi deve comparire solamente il normale countdown, senza testo aggiuntivo.
+- La scelta deve essere effettuata quando viene creato/mostrato il reminder e deve rimanere fissa per quel reminder, evitando che la frase cambi durante il countdown o durante un re-render della schermata.
+- Il photo prompt non deve modificare il funzionamento del countdown, delle notifiche o della cattura della foto.
+
+QUANDO VIENE MOSTRATO:
+Il photo prompt deve comparire all'interno della schermata di countdown, prima/durante il countdown, in modo discreto e coerente con il design esistente.
+
+ESEMPI DI PHOTO PROMPT:
+
+1. "Da provare: un grande abbraccio."
+2. "Che ne dite di una foto con le mani al cielo?"
+3. "Perché non provate a saltare tutti insieme?"
+4. "Da provare: la vostra posa migliore."
+5. "Che ne dite di una foto senza guardare la fotocamera?"
+6. "Perché non provate a fare una foto mentre ridete?"
+7. "Una sfida: tutti dentro l'inquadratura!"
+8. "Da provare: una posa un po' folle."
+9. "Che ne dite di un abbraccio di gruppo?"
+10. "Perché non provate a inventare una posa tutti insieme?"
+11. "Da provare: tutti in aria!"
+12. "Che ne dite di una foto completamente spontanea?"
+13. "Perché non provate a guardare tutti nella stessa direzione?"
+14. "Una sfida: la posa più assurda che riuscite a fare."
+15. "Da provare: dimenticatevi della fotocamera e godetevi il momento."
+
+IMPORTANTE:
+- Non mostrare sempre lo stesso tipo di frase.
+- Scegli casualmente un prompt dalla lista quando il reminder viene selezionato per mostrare un photo prompt.
+- Evita di mostrare lo stesso prompt due volte consecutivamente, quando possibile.
+- I prompt devono essere brevi, naturali e divertenti.
+- Non devono sembrare ordini obbligatori: devono essere suggerimenti.
+- Non tutti i prompt devono richiedere che tutti i partecipanti siano insieme, perché durante un'esperienza alcuni partecipanti potrebbero essere separati.
+- Mantieni la possibilità di aggiungere/modificare facilmente la lista dei prompt in futuro senza dover modificare la logica del countdown.
+
+NON modificare il comportamento esistente dei reminder, delle notifiche o della raccolta delle foto. Aggiungi solamente questa funzionalità alla schermata di countdown.
