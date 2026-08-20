@@ -18,7 +18,10 @@
       "bundleIdentifier": "com.weroll.app"
     },
     "android": {
-      "package": "com.weroll.app"
+      "package": "com.weroll.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -33,11 +36,12 @@
       "expo-font",
       "expo-dev-client",
       "expo-web-browser",
+      "./plugins/withAndroidPackagingExclusion",
       [
         "expo-notifications",
         {
           "sounds": [
-            "./assets/sounds/photo-reminder.mp3"
+            "./assets/sounds/photo_reminder.mp3"
           ]
         }
       ],
@@ -52,6 +56,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "cafdfc07-0d4a-4cfc-89af-5dea647808d5"
+      }
     }
   }
 }
