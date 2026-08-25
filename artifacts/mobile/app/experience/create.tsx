@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useCreateExperience } from '@workspace/api-client-react';
+import { ApiError, ResponseParseError, useCreateExperience } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,6 +25,29 @@ function timeParts(value: string) {
 
 function formatTime(hour: number, minute: number) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function createGroupErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    console.error('Create experience request failed', {
+      method: error.method,
+      url: error.url,
+      status: error.status,
+      response: error.data,
+    });
+    return `Il server ha risposto con errore (${error.status}). Riprova tra un momento.`;
+  }
+  if (error instanceof ResponseParseError) {
+    console.error('Create experience response could not be parsed', {
+      method: error.method,
+      url: error.url,
+      status: error.status,
+      rawBody: error.rawBody,
+    });
+    return 'Il server ha restituito una risposta non valida. Riprova tra un momento.';
+  }
+  console.error('Create experience network error', error);
+  return 'Controlla la connessione e riprova tra un momento.';
 }
 
 export default function CreateGroupScreen() {
@@ -60,7 +83,7 @@ export default function CreateGroupScreen() {
         setCreated({ id: group.id, inviteCode: group.inviteCode });
         setStep(4);
       },
-      onError: () => Alert.alert('Non riusciamo a creare il gruppo', 'Riprova tra un momento.'),
+      onError: (error: unknown) => Alert.alert('Non riusciamo a creare il gruppo', createGroupErrorMessage(error)),
     });
   };
 

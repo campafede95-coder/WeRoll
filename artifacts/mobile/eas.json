@@ -2,11 +2,9 @@
   "build": {
     "android-apk": {
       "distribution": "internal",
+      "environment": "production",
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_DOMAIN": "43959092-a8f3-4041-9cc1-1760ebf934ee-00-323ecu1mb49m9.archer.replit.dev"
       },
       "channel": "android-apk"
     },

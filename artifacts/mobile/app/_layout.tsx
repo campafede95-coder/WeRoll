@@ -22,8 +22,17 @@ import { ensurePhotoReminderChannel } from '@/constants/notifications';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
-const domain = process.env.EXPO_PUBLIC_DOMAIN;
-if (domain) setBaseUrl(`https://${domain}`);
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+if (!apiBaseUrl) {
+  throw new Error('EXPO_PUBLIC_API_URL is required. Configure it with the stable API deployment URL before building the app.');
+}
+if (!/^https:\/\//i.test(apiBaseUrl)) {
+  throw new Error('EXPO_PUBLIC_API_URL must be an absolute HTTPS URL.');
+}
+if (!__DEV__ && new URL(apiBaseUrl).hostname.endsWith('.replit.dev')) {
+  throw new Error('Standalone builds must use the stable API deployment URL, not a Replit development domain.');
+}
+setBaseUrl(apiBaseUrl);
 
 const queryClient = new QueryClient();
 
@@ -54,15 +63,31 @@ function GuestIdentityBootstrap({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false);
   const colors = useColors();
   useEffect(() => {
+    let cancelled = false;
     const prepare = async () => {
-      const existing = await AsyncStorage.getItem('pic-sync-guest-id');
-      const id = existing ?? `guest-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      if (!existing) await AsyncStorage.setItem('pic-sync-guest-id', id);
-      setGuestIdentityGetter(async () => ({ id, displayName: (await AsyncStorage.getItem('pic-sync-guest-name')) || 'Partecipante' }));
-      setReady(true);
+      try {
+        // Do not accept an empty/corrupted persisted value: the API rejects it
+        // as a missing identity, which otherwise only becomes visible after a
+        // later app launch.
+        const existing = (await AsyncStorage.getItem('pic-sync-guest-id'))?.trim();
+        const id = existing || `guest-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        if (!existing) await AsyncStorage.setItem('pic-sync-guest-id', id);
+
+        setGuestIdentityGetter(async () => ({
+          id,
+          displayName: (await AsyncStorage.getItem('pic-sync-guest-name'))?.trim() || 'Partecipante',
+        }));
+        if (!cancelled) setReady(true);
+      } catch (error) {
+        // A storage failure must not allow requests to proceed without an ID.
+        console.error('Unable to initialize the guest identity', error);
+      }
     };
     void prepare();
-    return () => setGuestIdentityGetter(null);
+    return () => {
+      cancelled = true;
+      setGuestIdentityGetter(null);
+    };
   }, []);
   if (!ready) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}><ActivityIndicator color={colors.primary} /></View>;
   return <>{children}</>;
