@@ -76,7 +76,6 @@ export async function deliverDuePhotoReminders() {
         const unregisteredTokens = failedTokens.filter(({ ticket }) => ticket.details?.error === "DeviceNotRegistered").map(({ token }) => token);
         if (unregisteredTokens.length) await db.delete(pushTokensTable).where(inArray(pushTokensTable.token, unregisteredTokens));
         logger.warn({ reminderId: reminder.id, failures: failedTokens.map(({ token, ticket }) => ({ token, message: ticket.message, error: ticket.details?.error })) }, "Expo rejected one or more reminder push tokens");
-        throw new Error(`Expo rejected ${failedTokens.length} reminder push token(s)`);
       }
     } catch (error) {
       await db.update(remindersTable).set({ notifiedAt: null })
