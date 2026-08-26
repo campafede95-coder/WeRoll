@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,10 +13,10 @@ import { Image } from 'expo-image';
 import { Alert, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
+import { PHOTO_WINDOW_MS, useActiveReminder } from '@/constants/activeReminder';
 import { ensurePhotoReminderChannel, PHOTO_REMINDER_CHANNEL, PHOTO_REMINDER_SOUND } from '@/constants/notifications';
 import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
 
-const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 function partsFor(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
   const get = (kind: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === kind)?.value);
@@ -106,7 +106,7 @@ async function imageFileForArchive(memory: AlbumMemory, index: number) {
 export default function GroupSessionScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { id, experienceId: experienceIdParam, momentReminderId, momentScheduledAt } = useLocalSearchParams<{ id: string; experienceId?: string; momentReminderId?: string; momentScheduledAt?: string }>();
+  const { id, experienceId: experienceIdParam, momentReminderId: routeReminderId, momentScheduledAt: routeScheduledAt } = useLocalSearchParams<{ id: string; experienceId?: string; momentReminderId?: string; momentScheduledAt?: string }>();
   const experienceId = resolveExperienceId(experienceIdParam, id);
   const queryClient = useQueryClient();
   const query = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId), refetchInterval: 5000 } });
@@ -118,8 +118,18 @@ export default function GroupSessionScreen() {
   const [testNotificationState, setTestNotificationState] = useState<TestNotificationState>('idle');
   const [isExportingAlbum, setIsExportingAlbum] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const schedulingExperiences = useRef(new Set<string>());
   const group = query.data;
+  const notificationReminder = useActiveReminder(experienceId);
+  const scheduledReminder = useMemo(() => group?.reminders
+    .filter((reminder) => {
+      const scheduledAt = new Date(reminder.scheduledAt).getTime();
+      return Number.isFinite(scheduledAt) && scheduledAt <= now && scheduledAt + PHOTO_WINDOW_MS > now;
+    })
+    .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())[0], [group?.reminders, now]);
+  const routedReminderIsActive = routeScheduledAt && new Date(routeScheduledAt).getTime() + PHOTO_WINDOW_MS > now;
+  const activeReminder = routedReminderIsActive ? { reminderId: routeReminderId ?? '', scheduledAt: routeScheduledAt } : notificationReminder ?? (scheduledReminder ? { reminderId: scheduledReminder.id, scheduledAt: scheduledReminder.scheduledAt } : null);
+  const momentReminderId = activeReminder?.reminderId;
+  const momentScheduledAt = activeReminder?.scheduledAt;
   const momentEndTime = momentScheduledAt ? new Date(momentScheduledAt).getTime() + PHOTO_WINDOW_MS : 0;
   const momentRemaining = momentEndTime > 0 ? Math.max(0, momentEndTime - now) : 0;
   const hasActiveMoment = Boolean(momentScheduledAt) && momentRemaining > 0;
@@ -129,10 +139,10 @@ export default function GroupSessionScreen() {
   }, [experienceId]);
 
   useEffect(() => {
-    if (!momentScheduledAt || !hasActiveMoment) return;
+    if (group?.sessionStatus !== 'active') return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [hasActiveMoment, momentScheduledAt]);
+  }, [group?.sessionStatus]);
 
   useEffect(() => {
     if (!group || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
@@ -152,10 +162,16 @@ export default function GroupSessionScreen() {
 
         const token = await Notifications.getExpoPushTokenAsync({ projectId });
         if (cancelled || !token.data) return;
-        registerPushToken.mutate({
-          experienceId: group.id,
-          data: { token: token.data, platform: Platform.OS === 'ios' ? 'ios' : 'android' },
-        });
+        const data = { token: token.data, platform: Platform.OS === 'ios' ? 'ios' as const : 'android' as const };
+        for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+          try {
+            await registerPushToken.mutateAsync({ experienceId: group.id, data });
+            return;
+          } catch (error) {
+            if (attempt === 2 || cancelled) throw error;
+            await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 1_000));
+          }
+        }
       } catch (error) {
         console.warn('Non è stato possibile registrare questo telefono per gli avvisi del gruppo.', error);
       }
@@ -164,52 +180,6 @@ export default function GroupSessionScreen() {
     void registerThisDevice();
     return () => { cancelled = true; };
   }, [group?.id]);
-
-  useEffect(() => {
-    if (!group || group.sessionStatus !== 'active' || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
-    if (schedulingExperiences.current.has(group.id)) return;
-    schedulingExperiences.current.add(group.id);
-
-    const scheduleReminders = async () => {
-      try {
-        const currentPermission = await Notifications.getPermissionsAsync();
-        const permission = currentPermission.granted ? currentPermission : await Notifications.requestPermissionsAsync();
-        if (!permission.granted) return;
-        await ensurePhotoReminderChannel();
-
-        const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-        const scheduledReminderIds = new Set(
-          scheduled
-            .filter((notification) => notification.content.data?.experienceId === group.id)
-            .map((notification) => notification.content.data?.reminderId)
-            .filter((reminderId): reminderId is string => typeof reminderId === 'string'),
-        );
-        const pendingReminders = group.reminders.filter((reminder) =>
-          new Date(reminder.scheduledAt).getTime() > Date.now() && !scheduledReminderIds.has(reminder.id),
-        );
-
-        await Promise.all(pendingReminders.map((reminder) => Notifications.scheduleNotificationAsync({
-          content: {
-            title: reminder.title,
-            body: 'Hai 15 minuti per scattare questo ricordo.',
-            sound: PHOTO_REMINDER_SOUND,
-            data: { experienceId: group.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt },
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: new Date(reminder.scheduledAt),
-            channelId: PHOTO_REMINDER_CHANNEL,
-          },
-        })));
-      } catch (error) {
-        console.warn('Non è stato possibile programmare le sveglie del gruppo.', error);
-      } finally {
-        schedulingExperiences.current.delete(group.id);
-      }
-    };
-
-    void scheduleReminders();
-  }, [group?.id, group?.sessionStatus, group?.reminders]);
 
   useEffect(() => {
     if (testNotificationState !== 'scheduled') return;

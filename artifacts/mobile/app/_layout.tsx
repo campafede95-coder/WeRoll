@@ -18,6 +18,7 @@ import * as Notifications from 'expo-notifications';
 import { ActivityIndicator, Platform, View } from 'react-native';
 import { setBaseUrl, setGuestIdentityGetter } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
+import { activateReminder } from '@/constants/activeReminder';
 import { ensurePhotoReminderChannel } from '@/constants/notifications';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -45,13 +46,16 @@ function openPhotoMoment(notification: Notifications.Notification) {
   const experienceId = data?.experienceId;
   if (typeof experienceId !== 'string') return false;
   const isTest = data?.test === true || data?.test === 'true';
+  const scheduledAt = typeof data?.scheduledAt === 'string' ? data.scheduledAt : '';
+  if (!scheduledAt || !Number.isFinite(new Date(scheduledAt).getTime())) return false;
+  if (!isTest && !activateReminder(data)) return false;
   router.push({
     pathname: '/moment/[id]',
     params: {
       id: experienceId,
       experienceId,
       reminderId: typeof data.reminderId === 'string' ? data.reminderId : '',
-      scheduledAt: typeof data.scheduledAt === 'string' ? data.scheduledAt : new Date(notification.date).toISOString(),
+      scheduledAt,
       test: isTest ? 'true' : '',
       notificationId: notification.request.identifier,
     },
@@ -128,17 +132,22 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!rootNavigationState?.key) return;
-    const handleNotification = (notification: Notifications.Notification) => {
+    const handleResponseNotification = (notification: Notifications.Notification) => {
       const notificationId = notification.request.identifier;
       if (handledNotificationIds.current.has(notificationId)) return;
       if (openPhotoMoment(notification)) handledNotificationIds.current.add(notificationId);
     };
+    const handleReceivedNotification = (notification: Notifications.Notification) => {
+      // In foreground keep the participant in the session and update its
+      // countdown state. Navigation is reserved for an explicit notification tap.
+      activateReminder(notification.request.content.data);
+    };
     const handleResponse = async (response: Notifications.NotificationResponse | null) => {
       if (!response) return;
-      handleNotification(response.notification);
+      handleResponseNotification(response.notification);
       if (Platform.OS !== 'web') await Notifications.clearLastNotificationResponseAsync();
     };
-    const receivedSubscription = Notifications.addNotificationReceivedListener(handleNotification);
+    const receivedSubscription = Notifications.addNotificationReceivedListener(handleReceivedNotification);
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => void handleResponse(response));
     if (Platform.OS !== 'web') void Notifications.getLastNotificationResponseAsync().then(handleResponse);
     return () => {

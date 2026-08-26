@@ -10,6 +10,17 @@ const inviteCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 const REMINDER_SOUND = "photo-reminder.mp3";
 const REMINDER_CHANNEL = "pic-sync-reminders-v2";
+const EXPO_PUSH_BATCH_SIZE = 100;
+
+type ExpoPushTicket = {
+  status?: "ok" | "error";
+  message?: string;
+  details?: { error?: string };
+};
+
+function batches<T>(items: T[], size: number) {
+  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
+}
 
 export async function deliverDuePhotoReminders() {
   const now = new Date();
@@ -28,6 +39,8 @@ export async function deliverDuePhotoReminders() {
     const members = await db.select({ userId: participantsTable.userId }).from(participantsTable)
       .where(eq(participantsTable.experienceId, experience.id));
     const userIds = members.map((member) => member.userId);
+    // Tokens are intentionally stored per device, rather than per user: a
+    // participant may use the same group on more than one phone.
     const tokens = userIds.length ? await db.select({ token: pushTokensTable.token }).from(pushTokensTable)
       .where(inArray(pushTokensTable.userId, userIds)) : [];
     if (!tokens.length) continue;
@@ -35,20 +48,36 @@ export async function deliverDuePhotoReminders() {
       .where(and(eq(remindersTable.id, reminder.id), isNull(remindersTable.notifiedAt))).returning({ id: remindersTable.id });
     if (!claimed[0]) continue;
     try {
-      const response = await fetch("https://exp.host/--/api/v2/push/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(tokens.map(({ token }) => ({
-          to: token,
-          title: `${organizerName} · ${reminder.title}`,
-          body: `${organizerName} ti invita a scattare: hai 15 minuti per questo ricordo.`,
-          sound: REMINDER_SOUND,
-          priority: "high",
-          channelId: REMINDER_CHANNEL,
-          data: { experienceId: experience.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt.toISOString() },
-        }))),
-      });
-      if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
+      const failedTokens: Array<{ token: string; ticket: ExpoPushTicket }> = [];
+      for (const batch of batches(tokens, EXPO_PUSH_BATCH_SIZE)) {
+        const response = await fetch("https://exp.host/--/api/v2/push/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(batch.map(({ token }) => ({
+            to: token,
+            title: `${organizerName} · ${reminder.title}`,
+            body: `${organizerName} ti invita a scattare: hai 15 minuti per questo ricordo.`,
+            sound: REMINDER_SOUND,
+            priority: "high",
+            channelId: REMINDER_CHANNEL,
+            data: { experienceId: experience.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt.toISOString() },
+          }))),
+        });
+        if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
+        const payload: unknown = await response.json();
+        const tickets = payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
+          ? (payload as { data: ExpoPushTicket[] }).data : null;
+        if (!tickets || tickets.length !== batch.length) throw new Error("Expo push service returned an invalid ticket response");
+        tickets.forEach((ticket, index) => {
+          if (ticket.status !== "ok") failedTokens.push({ token: batch[index].token, ticket });
+        });
+      }
+      if (failedTokens.length) {
+        const unregisteredTokens = failedTokens.filter(({ ticket }) => ticket.details?.error === "DeviceNotRegistered").map(({ token }) => token);
+        if (unregisteredTokens.length) await db.delete(pushTokensTable).where(inArray(pushTokensTable.token, unregisteredTokens));
+        logger.warn({ reminderId: reminder.id, failures: failedTokens.map(({ token, ticket }) => ({ token, message: ticket.message, error: ticket.details?.error })) }, "Expo rejected one or more reminder push tokens");
+        throw new Error(`Expo rejected ${failedTokens.length} reminder push token(s)`);
+      }
     } catch (error) {
       await db.update(remindersTable).set({ notifiedAt: null })
         .where(and(eq(remindersTable.id, reminder.id), eq(remindersTable.notifiedAt, now)));
