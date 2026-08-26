@@ -19,7 +19,7 @@ export default function LandingScreen() {
         <View>
           <Text style={[styles.eyebrow, { color: colors.primaryForeground }]}>ALBUM CONDIVISO PER AVVENTURE</Text>
           <Text style={[styles.title, { color: colors.primaryForeground }]}>Cattura i momenti,{'\n'}condividi{'\n'}l&apos;avventura.</Text>
-          <Text style={[styles.body, { color: colors.primaryForeground }]}>Create un gruppo, impostate le sveglie e costruite insieme un album fotografico della vostra giornata.</Text>
+          <Text style={[styles.body, { color: colors.primaryForeground }]}>Create un gruppo, programmate i vostri momenti e costruite insieme l&apos;album fotografico della giornata.</Text>
         </View>
         <View style={styles.options}>
           <Pressable accessibilityRole="button" accessibilityLabel="Crea un gruppo" onPress={() => router.push('/experience/create' as never)} style={({ pressed }) => [styles.option, { backgroundColor: colors.card }, pressed && { transform: [{ scale: 0.985 }], opacity: 0.92 }]}>

@@ -125,7 +125,7 @@ export default function CreateGroupScreen() {
         </>
       ) : (
         <>
-          <View style={styles.intro}><View style={[styles.introIcon, { backgroundColor: colors.secondary }]}><Feather name="clock" size={22} color={colors.primary} /></View><Text style={[styles.heading, { color: colors.foreground }]}>Fascia oraria{'\n'}dell&apos;avventura</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Le sveglie verranno distribuite in modo equilibrato in questo intervallo. Potrai cambiarle nella lobby.</Text></View>
+          <View style={styles.intro}><View style={[styles.introIcon, { backgroundColor: colors.secondary }]}><Feather name="clock" size={22} color={colors.primary} /></View><Text style={[styles.heading, { color: colors.foreground }]}>Fascia oraria{'\n'}dell&apos;avventura</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>I vostri momenti fotografici verranno distribuiti a sorpresa durante questo intervallo.</Text></View>
           <View style={styles.timeStack}>
             {([{ field: 'start' as const, label: 'INIZIO', value: windowStart }, { field: 'end' as const, label: 'FINE', value: windowEnd }]).map(({ field, label, value }) => (
               <Pressable key={field} accessibilityRole="button" accessibilityLabel={`Scegli orario di ${label.toLowerCase()}`} testID={field === 'start' ? 'start-time-picker' : 'end-time-picker'} onPress={() => { const current = timeParts(value); setTimePicker({ field, ...current }); }} style={({ pressed }) => [styles.timeCard, { backgroundColor: colors.card, borderColor: colors.border }, pressed && styles.pressed]}>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -52,6 +52,10 @@ type TestNotificationState = 'idle' | 'scheduled';
 type AlbumMemory = { id: string; imageUri: string; authorName: string; capturedAt: string };
 
 const TEST_NOTIFICATION_DELAY_SECONDS = 5;
+const PICKER_HEIGHT = 216;
+const PICKER_OPTION_HEIGHT = 43;
+const PICKER_OPTION_GAP = 6;
+const PICKER_COLUMN_PADDING = 76;
 const BASE64_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function sanitizeFilePart(value: string) {
@@ -106,6 +110,8 @@ async function imageFileForArchive(memory: AlbumMemory, index: number) {
 export default function GroupSessionScreen() {
   const colors = useColors();
   const router = useRouter();
+  const hourPickerRef = useRef<ScrollView>(null);
+  const minutePickerRef = useRef<ScrollView>(null);
   const { id, experienceId: experienceIdParam, momentReminderId: routeReminderId, momentScheduledAt: routeScheduledAt } = useLocalSearchParams<{ id: string; experienceId?: string; momentReminderId?: string; momentScheduledAt?: string }>();
   const experienceId = resolveExperienceId(experienceIdParam, id);
   const queryClient = useQueryClient();
@@ -279,6 +285,37 @@ export default function GroupSessionScreen() {
     }
   };
 
+  const hours = useMemo(() => {
+    if (!group) return [];
+    return Array.from({ length: Math.floor(toMinutes(group.windowEnd) / 60) - Math.floor(toMinutes(group.windowStart) / 60) + 1 }, (_, index) => Math.floor(toMinutes(group.windowStart) / 60) + index);
+  }, [group?.windowEnd, group?.windowStart]);
+  const minuteOptions = useMemo(() => {
+    if (!editing || !group) return [];
+    return Array.from({ length: 60 }, (_, index) => index).filter((minute) => {
+      const value = editing.hour * 60 + minute;
+      return value >= toMinutes(group.windowStart) && value <= toMinutes(group.windowEnd);
+    });
+  }, [editing, group?.windowEnd, group?.windowStart]);
+  const pickerOffsetForIndex = (index: number) => Math.max(
+    0,
+    PICKER_COLUMN_PADDING +
+      index * (PICKER_OPTION_HEIGHT + PICKER_OPTION_GAP) -
+      (PICKER_HEIGHT - PICKER_OPTION_HEIGHT) / 2,
+  );
+  const scrollToEditingTime = (selection: EditingReminder | null) => {
+    if (!selection) return;
+    const hourIndex = Math.max(0, hours.indexOf(selection.hour));
+    const minuteIndex = Math.max(0, minuteOptions.indexOf(selection.minute));
+    hourPickerRef.current?.scrollTo({ y: pickerOffsetForIndex(hourIndex), animated: false });
+    minutePickerRef.current?.scrollTo({ y: pickerOffsetForIndex(minuteIndex), animated: false });
+  };
+
+  useEffect(() => {
+    if (!editing) return;
+    const frame = requestAnimationFrame(() => scrollToEditingTime(editing));
+    return () => cancelAnimationFrame(frame);
+  }, [editing, hours, minuteOptions]);
+
   if (query.isLoading) return <Screen><AppHeader title="Gruppo" back /><SkeletonList /></Screen>;
   if (query.isError || !group) return <Screen><AppHeader title="Gruppo" back /><ErrorState onRetry={() => void query.refetch()} /></Screen>;
 
@@ -286,16 +323,11 @@ export default function GroupSessionScreen() {
     return <Screen><AppHeader title="Album finale" back /><Text style={[styles.eyebrow, { color: colors.primary }]}>SESSIONE CONCLUSA</Text><Text style={[styles.title, { color: colors.foreground }]}>Tutti i vostri{'\n'}ricordi insieme.</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{group.memories.length} foto raccolte durante l&apos;avventura.</Text>{group.memories.length ? <View style={styles.album}>{group.memories.map((memory) => <View key={memory.id} style={styles.memory}><Image source={{ uri: memory.imageUri }} contentFit="cover" style={styles.memoryImage} /><Text numberOfLines={1} style={[styles.memoryAuthor, { color: colors.foreground }]}>{memory.authorName}</Text></View>)}</View> : <EmptyState icon="image" title="Nessuna foto ancora" body="Le foto scattate verranno raccolte qui." />}{group.memories.length ? <><PrimaryButton label="Scarica album ZIP" icon="download" onPress={() => void exportAlbum()} loading={isExportingAlbum} style={{ marginTop: 22 }} /><Text style={[styles.zipHint, { color: colors.mutedForeground }]}>Scegli “Salva su File” per conservare tutte le foto in un unico ZIP.</Text></> : null}</Screen>;
   }
 
-  const hours = Array.from({ length: Math.floor(toMinutes(group.windowEnd) / 60) - Math.floor(toMinutes(group.windowStart) / 60) + 1 }, (_, index) => Math.floor(toMinutes(group.windowStart) / 60) + index);
-  const minuteOptions = editing ? Array.from({ length: 60 }, (_, index) => index).filter((minute) => {
-    const value = editing.hour * 60 + minute;
-    return value >= toMinutes(group.windowStart) && value <= toMinutes(group.windowEnd);
-  }) : [];
   const waitingRoom = group.sessionStatus === 'lobby' && !group.isOwner;
 
   return (
     <Screen>
-      <AppHeader title={waitingRoom ? 'In attesa' : group.sessionStatus === 'active' ? 'Sessione attiva' : 'Imposta sveglie'} back action={<View style={styles.people}><Feather name="users" size={18} color={colors.mutedForeground} /><Text style={[styles.peopleText, { color: colors.foreground }]}>{group.participantCount}</Text></View>} />
+      <AppHeader title={waitingRoom ? 'In attesa' : group.sessionStatus === 'active' ? 'Sessione attiva' : 'I tuoi momenti'} back action={<View style={styles.people}><Feather name="users" size={18} color={colors.mutedForeground} /><Text style={[styles.peopleText, { color: colors.foreground }]}>{group.participantCount}</Text></View>} />
       <Surface style={styles.summary}>
         <Summary label="Codice" value={group.inviteCode} accent />
         <Summary label="Fascia oraria" value={`${group.windowStart} – ${group.windowEnd}`} />
@@ -312,33 +344,13 @@ export default function GroupSessionScreen() {
         </>
       ) : group.sessionStatus === 'lobby' ? (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Prepara le sveglie</Text>
-          <Text style={[styles.body, { color: colors.mutedForeground }]}>Tocca un orario per modificarlo. Ogni sveglia resta sempre nella fascia {group.windowStart} – {group.windowEnd}.</Text>
-          <Text style={[styles.listTitle, { color: colors.foreground }]}>Sveglie programmate</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Personalizza gli orari</Text>
+          <Text style={[styles.body, { color: colors.mutedForeground }]}>Tocca un orario se vuoi modificarlo. Tutti gli scatti rimarranno all&apos;interno della fascia {group.windowStart} – {group.windowEnd}.</Text>
+          <Text style={[styles.listTitle, { color: colors.foreground }]}>Timeline dei ricordi</Text>
           <View style={styles.reminderList}>{group.reminders.map((reminder) => <Pressable key={reminder.id} accessibilityRole="button" accessibilityLabel={`Modifica sveglia delle ${timeFromDate(reminder.scheduledAt, group.timeZone)}`} onPress={() => { const current = partsFor(new Date(reminder.scheduledAt), group.timeZone); setEditing({ id: reminder.id, hour: current.hour, minute: current.minute }); }} style={[styles.reminder, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="clock" size={23} color={colors.primary} /><Text style={[styles.reminderHour, { color: colors.foreground }]}>{timeFromDate(reminder.scheduledAt, group.timeZone)}</Text><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>)}</View>
           <Text style={[styles.rosterTitle, { color: colors.foreground }]}>Partecipanti ({group.participantCount})</Text>
           <View style={styles.roster}>{group.participants.map((participant) => <Surface key={participant.id} style={styles.person}><Text style={[styles.personName, { color: colors.foreground }]}>{participant.displayName}{participant.isOrganizer ? ' ✨' : ''}</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{participant.isOrganizer ? 'Organizzatore' : 'Nel gruppo'}</Text></Surface>)}</View>
           <PrimaryButton label="Avvia sessione" icon="play" onPress={startSession} loading={start.isPending} style={{ marginTop: 24 }} />
-          {group.isOwner ? (
-            <Surface style={styles.testCard}>
-              <View style={[styles.testIcon, { backgroundColor: colors.secondary }]}><Feather name="volume-2" size={19} color={colors.primary} /></View>
-              <View style={styles.testCopy}>
-                <Text style={[styles.testTitle, { color: colors.foreground }]}>Prova avviso</Text>
-                <Text style={[styles.testBody, { color: colors.mutedForeground }]}>Solo tu · tra {TEST_NOTIFICATION_DELAY_SECONDS} secondi · non modifica sessione o album</Text>
-              </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={testNotificationState === 'scheduled' ? 'Sveglia di prova programmata' : 'Invia sveglia di prova'}
-                testID="send-test-notification"
-                disabled={testNotificationState === 'scheduled'}
-                onPress={() => void sendTestNotification()}
-                style={({ pressed }) => [styles.testButton, { backgroundColor: testNotificationState === 'scheduled' ? colors.muted : colors.primary }, pressed && styles.pressed]}
-              >
-                <Feather name={testNotificationState === 'scheduled' ? 'check' : 'play'} size={16} color={testNotificationState === 'scheduled' ? colors.mutedForeground : colors.primaryForeground} />
-                <Text style={[styles.testButtonLabel, { color: testNotificationState === 'scheduled' ? colors.mutedForeground : colors.primaryForeground }]}>{testNotificationState === 'scheduled' ? 'In arrivo' : 'Invia'}</Text>
-              </Pressable>
-            </Surface>
-          ) : null}
         </>
       ) : (
         <>
@@ -358,7 +370,7 @@ export default function GroupSessionScreen() {
               <Feather name="chevron-right" size={19} color={colors.primary} />
             </Pressable>
           ) : null}
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Quando suona una sveglia hai 15 minuti per scattare. Puoi catturare un ricordo anche in qualsiasi altro momento.</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Ad ogni notifica hai 15 minuti per catturare il tuo ricordo.{'\n\n'}Ma niente pressione se non riesci: goditi il momento e scatta quando vuoi!</Text>
           <PrimaryButton
             label="Scatto libero"
             icon="camera"
@@ -374,7 +386,7 @@ export default function GroupSessionScreen() {
       )}
 
       <Modal visible={Boolean(editing)} transparent animationType="fade" onRequestClose={() => setEditing(null)}>
-        <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}><View style={[styles.pickerSheet, { backgroundColor: colors.background }]}><Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text><Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>Tra {group.windowStart} e {group.windowEnd}</Text><View style={[styles.picker, { borderColor: colors.border }]}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>{hours.map((hour) => <Pressable key={hour} onPress={() => setEditing((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, editing?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: editing?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}</ScrollView><Text style={[styles.colon, { color: colors.foreground }]}>:</Text><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>{minuteOptions.map((minute) => <Pressable key={minute} onPress={() => setEditing((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, editing?.minute === minute ? { backgroundColor: colors.primary } : undefined]}><Text style={[styles.timeOptionText, { color: editing?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}</ScrollView></View><PrimaryButton label="Conferma orario" icon="check" onPress={saveReminder} loading={updateReminder.isPending} /><Pressable onPress={() => setEditing(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable></View></View>
+        <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}><View style={[styles.pickerSheet, { backgroundColor: colors.background }]}><Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text><Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>Tra {group.windowStart} e {group.windowEnd}</Text><View style={[styles.picker, { borderColor: colors.border }]}><ScrollView ref={hourPickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToEditingTime(editing)}>{hours.map((hour) => <Pressable key={hour} onPress={() => setEditing((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, editing?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: editing?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}</ScrollView><Text style={[styles.colon, { color: colors.foreground }]}>:</Text><ScrollView ref={minutePickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToEditingTime(editing)}>{minuteOptions.map((minute) => <Pressable key={minute} onPress={() => setEditing((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, editing?.minute === minute ? { backgroundColor: colors.primary } : undefined]}><Text style={[styles.timeOptionText, { color: editing?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}</ScrollView></View><PrimaryButton label="Conferma orario" icon="check" onPress={saveReminder} loading={updateReminder.isPending} /><Pressable onPress={() => setEditing(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable></View></View>
       </Modal>
     </Screen>
   );
@@ -395,5 +407,5 @@ const styles = StyleSheet.create({
   momentBanner: { marginTop: 20, minHeight: 70, borderRadius: 19, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, momentIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, momentCopy: { flex: 1 }, momentKicker: { fontFamily: 'Inter_700Bold', fontSize: 9, letterSpacing: 1.2 }, momentTitle: { fontFamily: 'Inter_500Medium', fontSize: 13, marginTop: 3 }, momentCountdown: { fontFamily: 'Inter_700Bold', fontSize: 18, fontVariant: ['tabular-nums'] }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
   testCard: { marginTop: 16, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11 }, testIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, testCopy: { flex: 1 }, testTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 }, testBody: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16, marginTop: 3 }, testButton: { minWidth: 62, minHeight: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8 }, testButtonLabel: { fontFamily: 'Inter_700Bold', fontSize: 10 }, pressed: { opacity: 0.8, transform: [{ scale: 0.96 }] },
   eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 }, zipHint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 10, paddingHorizontal: 14 },
-  modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumnScroll: { flex: 1, alignSelf: 'stretch' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
 });

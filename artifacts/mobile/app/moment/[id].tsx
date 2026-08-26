@@ -29,6 +29,12 @@ export default function PhotoMomentScreen() {
   const experience = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId) && !isTest } }).data;
   const captureExperienceId = experience?.id ?? experienceId;
   const reminder = useMemo(() => experience?.reminders.find((item) => item.id === reminderId), [experience?.reminders, reminderId]);
+  const reminderProgress = useMemo(() => {
+    if (isTest || !experience?.reminders.length) return null;
+    const reminders = [...experience.reminders].sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+    const currentIndex = reminders.findIndex((item) => item.id === reminderId || (!reminderId && item.scheduledAt === scheduledAt));
+    return currentIndex >= 0 ? { current: currentIndex + 1, total: reminders.length } : null;
+  }, [experience?.reminders, isTest, reminderId, scheduledAt]);
   const reminderKey = !isTest && reminderId ? `${captureExperienceId}:${reminderId}` : '';
   const [photoPrompt] = useState(() => getPhotoPromptForReminder(reminderKey));
   const startTime = useMemo(() => {
@@ -102,8 +108,8 @@ export default function PhotoMomentScreen() {
           <Feather name={expired ? 'clock' : 'camera'} size={67} color={colors.primary} />
         </View>
         {isTest ? <View style={[styles.testPill, { backgroundColor: colors.accent }]}><Feather name="radio" size={13} color={colors.accentForeground} /><Text style={[styles.testPillText, { color: colors.accentForeground }]}>PROVA AVVISO · SOLO TU</Text></View> : null}
-        <Text style={[styles.title, { color: colors.foreground }]}>{expired ? 'Tempo scaduto' : isTest ? 'Countdown di prova' : 'Scatta una foto!'}</Text>
-        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{expired ? 'La finestra per questo ricordo è terminata' : isTest ? 'Controlla suono e vibrazione · questa foto non sarà salvata' : 'Tempo rimasto'}</Text>
+        <Text style={[styles.title, { color: colors.foreground }]}>{expired ? 'Tempo scaduto' : isTest ? 'Countdown di prova' : 'È ora del vostro ricordo!'}</Text>
+        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{expired ? 'La finestra per questo ricordo è terminata' : isTest ? 'Controlla suono e vibrazione · questa foto non sarà salvata' : 'Momento attivo per:'}</Text>
         {photoPrompt ? (
           <View style={[styles.promptCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Feather name="zap" size={16} color={colors.primary} />
@@ -111,20 +117,20 @@ export default function PhotoMomentScreen() {
           </View>
         ) : null}
         <Text accessibilityLabel={`${formatCountdown(remaining)} rimanenti`} testID="photo-window-countdown" style={[styles.countdown, { color: expired ? colors.mutedForeground : colors.primary }]}>{formatCountdown(remaining)}</Text>
-        {!isTest && reminder?.title ? <Text style={[styles.reminderTitle, { color: colors.mutedForeground }]}>{reminder.title}</Text> : null}
+        {!isTest && reminderProgress ? <Text style={[styles.reminderTitle, { color: colors.mutedForeground }]}>Ricordo n. {reminderProgress.current} di {reminderProgress.total}</Text> : null}
       </View>
 
       <View style={styles.actions}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isTest ? 'Scatta foto di prova senza salvare' : 'Scatta foto'}
+          accessibilityLabel={isTest ? 'Scatta foto di prova senza salvare' : 'Cattura il momento'}
           testID="photo-window-capture"
           disabled={expired}
           onPress={() => void openCapture()}
           style={({ pressed }) => [styles.primaryAction, { backgroundColor: expired ? colors.muted : colors.primary }, pressed && !expired && styles.pressed]}
         >
           <Feather name="camera" size={23} color={expired ? colors.mutedForeground : colors.primaryForeground} />
-          <Text style={[styles.primaryLabel, { color: expired ? colors.mutedForeground : colors.primaryForeground }]}>{isTest ? 'Scatta prova' : 'Scatta foto'}</Text>
+          <Text style={[styles.primaryLabel, { color: expired ? colors.mutedForeground : colors.primaryForeground }]}>{isTest ? 'Scatta prova' : 'Cattura il momento'}</Text>
         </Pressable>
         {isTest || expired ? (
           <Pressable
