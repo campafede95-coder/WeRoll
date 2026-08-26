@@ -18,26 +18,23 @@ export const PHOTO_PROMPTS = [
   'Da provare: dimenticatevi della fotocamera e godetevi il momento.',
 ] as const;
 
-const promptByReminderKey = new Map<string, string | null>();
-let lastPrompt: string | null = null;
+export type PhotoPromptVariant = 'special' | 'normal';
 
-function choosePhotoPrompt() {
-  if (Math.random() >= PHOTO_PROMPT_PROBABILITY) {
-    return null;
+function stableReminderBucket(reminderKey: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < reminderKey.length; index += 1) {
+    hash ^= reminderKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
   }
-
-  const availablePrompts = PHOTO_PROMPTS.filter((prompt) => prompt !== lastPrompt);
-  const prompt = availablePrompts[Math.floor(Math.random() * availablePrompts.length)] ?? PHOTO_PROMPTS[0];
-  lastPrompt = prompt;
-  return prompt;
+  return (hash >>> 0) % 100;
 }
 
-export function getPhotoPromptForReminder(reminderKey: string) {
+export function getPhotoPromptForReminder(reminderKey: string, messageVariant?: PhotoPromptVariant) {
   if (!reminderKey) return null;
 
-  if (!promptByReminderKey.has(reminderKey)) {
-    promptByReminderKey.set(reminderKey, choosePhotoPrompt());
-  }
+  const variant = messageVariant ?? (stableReminderBucket(reminderKey) < PHOTO_PROMPT_PROBABILITY * 100 ? 'special' : 'normal');
+  if (variant !== 'special') return null;
 
-  return promptByReminderKey.get(reminderKey) ?? null;
+  const promptIndex = stableReminderBucket(`${reminderKey}:prompt`) % PHOTO_PROMPTS.length;
+  return PHOTO_PROMPTS[promptIndex];
 }

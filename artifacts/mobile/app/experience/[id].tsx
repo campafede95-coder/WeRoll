@@ -10,13 +10,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Alert, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
-import { PHOTO_WINDOW_MS, useActiveReminder } from '@/constants/activeReminder';
-import { ensurePhotoReminderChannel, PHOTO_REMINDER_CHANNEL, PHOTO_REMINDER_SOUND } from '@/constants/notifications';
-import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
+import { LAST_EXPERIENCE_ID_STORAGE_KEY, rememberClosedExperience, resolveExperienceId } from '@/constants/experience';
 import { pickerOffsetForIndex } from '@/constants/timePicker';
+
+const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 
 function partsFor(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
@@ -49,10 +49,8 @@ function toMinutes(time?: string | null) {
 }
 
 type EditingReminder = { id: string; hour: number; minute: number } | null;
-type TestNotificationState = 'idle' | 'scheduled';
 type AlbumMemory = { id: string; imageUri: string; authorName: string; capturedAt: string };
 
-const TEST_NOTIFICATION_DELAY_SECONDS = 5;
 const BASE64_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function sanitizeFilePart(value: string) {
@@ -109,7 +107,7 @@ export default function GroupSessionScreen() {
   const router = useRouter();
   const hourPickerRef = useRef<ScrollView>(null);
   const minutePickerRef = useRef<ScrollView>(null);
-  const { id, experienceId: experienceIdParam, momentReminderId: routeReminderId, momentScheduledAt: routeScheduledAt } = useLocalSearchParams<{ id: string; experienceId?: string; momentReminderId?: string; momentScheduledAt?: string }>();
+  const { id, experienceId: experienceIdParam, momentReminderId, momentScheduledAt } = useLocalSearchParams<{ id: string; experienceId?: string; momentReminderId?: string; momentScheduledAt?: string }>();
   const experienceId = resolveExperienceId(experienceIdParam, id);
   const queryClient = useQueryClient();
   const query = useGetExperience(experienceId, { query: { queryKey: getGetExperienceQueryKey(experienceId), enabled: Boolean(experienceId), refetchInterval: 5000 } });
@@ -118,24 +116,26 @@ export default function GroupSessionScreen() {
   const updateReminder = useUpdateReminder();
   const registerPushToken = useRegisterPushToken();
   const [editing, setEditing] = useState<EditingReminder>(null);
-  const [testNotificationState, setTestNotificationState] = useState<TestNotificationState>('idle');
   const [isExportingAlbum, setIsExportingAlbum] = useState(false);
   const [now, setNow] = useState(Date.now());
   const group = query.data;
-  const notificationReminder = useActiveReminder(experienceId);
-  const scheduledReminder = useMemo(() => group?.reminders
-    .filter((reminder) => {
-      const scheduledAt = new Date(reminder.scheduledAt).getTime();
-      return Number.isFinite(scheduledAt) && scheduledAt <= now && scheduledAt + PHOTO_WINDOW_MS > now;
-    })
-    .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())[0], [group?.reminders, now]);
-  const routedReminderIsActive = routeScheduledAt && new Date(routeScheduledAt).getTime() + PHOTO_WINDOW_MS > now;
-  const activeReminder = routedReminderIsActive ? { reminderId: routeReminderId ?? '', scheduledAt: routeScheduledAt } : notificationReminder ?? (scheduledReminder ? { reminderId: scheduledReminder.id, scheduledAt: scheduledReminder.scheduledAt } : null);
-  const momentReminderId = activeReminder?.reminderId;
-  const momentScheduledAt = activeReminder?.scheduledAt;
-  const momentEndTime = momentScheduledAt ? new Date(momentScheduledAt).getTime() + PHOTO_WINDOW_MS : 0;
+  const derivedMoment = useMemo(() => {
+    if (!group || group.sessionStatus !== 'active') return null;
+    return group.reminders
+      .filter((reminder) => {
+        const start = new Date(reminder.scheduledAt).getTime();
+        return start <= now && now < start + PHOTO_WINDOW_MS;
+      })
+      .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())[0] ?? null;
+  }, [group, now]);
+  const routeMomentStart = momentScheduledAt ? new Date(momentScheduledAt).getTime() : 0;
+  const routeMomentIsActive = Number.isFinite(routeMomentStart) && routeMomentStart <= now && routeMomentStart + PHOTO_WINDOW_MS > now;
+  const activeMomentReminderId = routeMomentIsActive ? momentReminderId : derivedMoment?.id;
+  const activeMomentScheduledAt = routeMomentIsActive ? momentScheduledAt : derivedMoment?.scheduledAt;
+  const momentEndTime = activeMomentScheduledAt ? new Date(activeMomentScheduledAt).getTime() + PHOTO_WINDOW_MS : 0;
   const momentRemaining = momentEndTime > 0 ? Math.max(0, momentEndTime - now) : 0;
-  const hasActiveMoment = Boolean(momentScheduledAt) && momentRemaining > 0;
+  const hasActiveMoment = Boolean(activeMomentScheduledAt) && momentRemaining > 0;
+  const autoOpenedMomentRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (experienceId) void AsyncStorage.setItem(LAST_EXPERIENCE_ID_STORAGE_KEY, experienceId);
@@ -143,9 +143,26 @@ export default function GroupSessionScreen() {
 
   useEffect(() => {
     if (group?.sessionStatus !== 'active') return;
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [group?.sessionStatus]);
+
+  useEffect(() => {
+    if (!group || group.sessionStatus !== 'active' || !derivedMoment || routeMomentIsActive) return;
+    if (autoOpenedMomentRef.current === derivedMoment.id) return;
+    autoOpenedMomentRef.current = derivedMoment.id;
+    router.push({
+      pathname: '/moment/[id]',
+      params: {
+        id: group.id,
+        experienceId: group.id,
+        reminderId: derivedMoment.id,
+        scheduledAt: derivedMoment.scheduledAt,
+        source: 'session',
+      },
+    });
+  }, [derivedMoment, group, routeMomentIsActive, router]);
 
   useEffect(() => {
     if (!group || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
@@ -165,80 +182,68 @@ export default function GroupSessionScreen() {
 
         const token = await Notifications.getExpoPushTokenAsync({ projectId });
         if (cancelled || !token.data) return;
-        const data = { token: token.data, platform: Platform.OS === 'ios' ? 'ios' as const : 'android' as const };
-        for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
-          try {
-            await registerPushToken.mutateAsync({ experienceId: group.id, data });
-            return;
-          } catch (error) {
-            if (attempt === 2 || cancelled) throw error;
-            await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 1_000));
-          }
-        }
+        registerPushToken.mutate({
+          experienceId: group.id,
+          data: { token: token.data, platform: Platform.OS === 'ios' ? 'ios' : 'android' },
+        });
       } catch (error) {
         console.warn('Non è stato possibile registrare questo telefono per gli avvisi del gruppo.', error);
       }
     };
 
     void registerThisDevice();
-    return () => { cancelled = true; };
+    const tokenSubscription = Notifications.addPushTokenListener(() => void registerThisDevice());
+    return () => {
+      cancelled = true;
+      tokenSubscription.remove();
+    };
   }, [group?.id]);
 
   useEffect(() => {
-    if (testNotificationState !== 'scheduled') return;
-    const reset = setTimeout(() => setTestNotificationState('idle'), (TEST_NOTIFICATION_DELAY_SECONDS + 4) * 1000);
-    return () => clearTimeout(reset);
-  }, [testNotificationState]);
+    if (!group || (group.sessionStatus !== 'active' && group.sessionStatus !== 'closed') || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
+    const cancelLegacyLocalReminders = async () => {
+      try {
+        const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+        await Promise.all(scheduled
+          .filter((notification) =>
+            notification.content.data?.experienceId === group.id &&
+            (group.sessionStatus === 'closed' || (
+              notification.content.data?.test !== true &&
+              notification.content.data?.test !== 'true'
+            )))
+          .map((notification) => Notifications.cancelScheduledNotificationAsync(notification.identifier)));
+        if (group.sessionStatus === 'closed') {
+          await AsyncStorage.removeItem('pic-sync-active-moment');
+          await rememberClosedExperience(group.id);
+        }
+      } catch (error) {
+        console.warn('Non è stato possibile rimuovere una vecchia sveglia locale del gruppo.', error);
+      }
+    };
+    void cancelLegacyLocalReminders();
+  }, [group?.id, group?.sessionStatus]);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(experienceId) });
-  const sendTestNotification = async () => {
-    if (!group || !group.isOwner || testNotificationState === 'scheduled') return;
-    if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
-      Alert.alert('Prova su telefono', 'Apri Pic Sync su iPhone o Android per verificare suono, vibrazione e fotocamera.');
-      return;
-    }
-
-    const current = await Notifications.getPermissionsAsync();
-    const permission = current.granted ? current : await Notifications.requestPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert(
-        permission.canAskAgain ? 'Avvisi non abilitati' : 'Avvisi disattivati',
-        'Per provare suono e vibrazione, abilita le notifiche di Pic Sync dalle impostazioni del telefono.',
-        [{ text: 'Apri impostazioni', onPress: () => void Linking.openSettings() }, { text: 'Annulla', style: 'cancel' }],
-      );
-      return;
-    }
-
-    const scheduledAt = new Date(Date.now() + TEST_NOTIFICATION_DELAY_SECONDS * 1000).toISOString();
-    try {
-      await ensurePhotoReminderChannel();
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Prova avviso',
-          body: 'Suono e vibrazione · tocca per aprire il countdown di prova.',
-          sound: PHOTO_REMINDER_SOUND,
-          data: { experienceId: group.id, scheduledAt, test: true },
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: new Date(scheduledAt),
-          channelId: PHOTO_REMINDER_CHANNEL,
-        },
-      });
-      setTestNotificationState('scheduled');
-    } catch {
-      Alert.alert('Prova non programmata', 'Non riusciamo a programmare la sveglia di prova. Riprova tra un momento.');
-    }
-  };
   const startSession = () => { if (experienceId) start.mutate({ experienceId }, { onSuccess: refresh }); };
   const closeSession = () => {
     if (!experienceId) return;
-    void Notifications.getAllScheduledNotificationsAsync().then((scheduled) => Promise.all(
-      scheduled
-        .filter((notification) => notification.content.data?.experienceId === experienceId)
-        .map((notification) => Notifications.cancelScheduledNotificationAsync(notification.identifier)),
-    ));
-    close.mutate({ experienceId }, { onSuccess: refresh });
+    const closeAfterLocalCancellation = async () => {
+      if (Platform.OS === 'ios' || Platform.OS === 'android') try {
+        const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+        const sessionNotifications = scheduled.filter((notification) => notification.content.data?.experienceId === experienceId);
+        await Promise.allSettled(sessionNotifications.map((notification) => Notifications.cancelScheduledNotificationAsync(notification.identifier)));
+      } catch (error) {
+        console.warn('Non è stato possibile rimuovere tutte le sveglie locali della sessione.', error);
+      }
+      await AsyncStorage.removeItem('pic-sync-active-moment');
+      close.mutate({ experienceId }, {
+        onSuccess: () => {
+          void rememberClosedExperience(experienceId);
+          refresh();
+        },
+      });
+    };
+    void closeAfterLocalCancellation();
   };
   const saveReminder = () => {
     if (!group || !editing || !experienceId) return;
@@ -287,12 +292,13 @@ export default function GroupSessionScreen() {
     return Array.from({ length: Math.floor(toMinutes(group.windowEnd) / 60) - Math.floor(toMinutes(group.windowStart) / 60) + 1 }, (_, index) => Math.floor(toMinutes(group.windowStart) / 60) + index);
   }, [group?.windowEnd, group?.windowStart]);
   const minuteOptions = useMemo(() => {
-    if (!editing || !group) return [];
+    if (!group || !editing) return [];
     return Array.from({ length: 60 }, (_, index) => index).filter((minute) => {
       const value = editing.hour * 60 + minute;
       return value >= toMinutes(group.windowStart) && value <= toMinutes(group.windowEnd);
     });
   }, [editing, group?.windowEnd, group?.windowStart]);
+  const waitingRoom = group?.sessionStatus === 'lobby' && !group.isOwner;
   const scrollToEditingTime = (selection: EditingReminder | null) => {
     if (!selection) return;
     const hourIndex = Math.max(0, hours.indexOf(selection.hour));
@@ -314,11 +320,9 @@ export default function GroupSessionScreen() {
     return <Screen><AppHeader title="Album finale" back /><Text style={[styles.eyebrow, { color: colors.primary }]}>SESSIONE CONCLUSA</Text><Text style={[styles.title, { color: colors.foreground }]}>Tutti i vostri{'\n'}ricordi insieme.</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{group.memories.length} foto raccolte durante l&apos;avventura.</Text>{group.memories.length ? <View style={styles.album}>{group.memories.map((memory) => <View key={memory.id} style={styles.memory}><Image source={{ uri: memory.imageUri }} contentFit="cover" style={styles.memoryImage} /><Text numberOfLines={1} style={[styles.memoryAuthor, { color: colors.foreground }]}>{memory.authorName}</Text></View>)}</View> : <EmptyState icon="image" title="Nessuna foto ancora" body="Le foto scattate verranno raccolte qui." />}{group.memories.length ? <><PrimaryButton label="Scarica album ZIP" icon="download" onPress={() => void exportAlbum()} loading={isExportingAlbum} style={{ marginTop: 22 }} /><Text style={[styles.zipHint, { color: colors.mutedForeground }]}>Scegli “Salva su File” per conservare tutte le foto in un unico ZIP.</Text></> : null}</Screen>;
   }
 
-  const waitingRoom = group.sessionStatus === 'lobby' && !group.isOwner;
-
   return (
     <Screen>
-      <AppHeader title={waitingRoom ? 'In attesa' : group.sessionStatus === 'active' ? 'Sessione attiva' : 'I tuoi momenti'} back action={<View style={styles.people}><Feather name="users" size={18} color={colors.mutedForeground} /><Text style={[styles.peopleText, { color: colors.foreground }]}>{group.participantCount}</Text></View>} />
+       <AppHeader title={waitingRoom ? 'In attesa' : group.sessionStatus === 'active' ? 'Sessione attiva' : 'I tuoi momenti'} back action={<View style={styles.people}><Feather name="users" size={18} color={colors.mutedForeground} /><Text style={[styles.peopleText, { color: colors.foreground }]}>{group.participantCount}</Text></View>} />
       <Surface style={styles.summary}>
         <Summary label="Codice" value={group.inviteCode} accent />
         <Summary label="Fascia oraria" value={`${group.windowStart} – ${group.windowEnd}`} />
@@ -335,9 +339,9 @@ export default function GroupSessionScreen() {
         </>
       ) : group.sessionStatus === 'lobby' ? (
         <>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Personalizza gli orari</Text>
-          <Text style={[styles.body, { color: colors.mutedForeground }]}>Tocca un orario se vuoi modificarlo. Tutti gli scatti rimarranno all&apos;interno della fascia {group.windowStart} – {group.windowEnd}.</Text>
-          <Text style={[styles.listTitle, { color: colors.foreground }]}>Timeline dei ricordi</Text>
+           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Personalizza gli orari</Text>
+           <Text style={[styles.body, { color: colors.mutedForeground }]}>Tocca un orario se vuoi modificarlo. Tutti gli scatti rimarranno all&apos;interno della fascia {group.windowStart} – {group.windowEnd}.</Text>
+           <Text style={[styles.listTitle, { color: colors.foreground }]}>Timeline dei ricordi</Text>
           <View style={styles.reminderList}>{group.reminders.map((reminder) => <Pressable key={reminder.id} accessibilityRole="button" accessibilityLabel={`Modifica sveglia delle ${timeFromDate(reminder.scheduledAt, group.timeZone)}`} onPress={() => { const current = partsFor(new Date(reminder.scheduledAt), group.timeZone); setEditing({ id: reminder.id, hour: current.hour, minute: current.minute }); }} style={[styles.reminder, { borderColor: colors.border, backgroundColor: colors.card }]}><Feather name="clock" size={23} color={colors.primary} /><Text style={[styles.reminderHour, { color: colors.foreground }]}>{timeFromDate(reminder.scheduledAt, group.timeZone)}</Text><Feather name="chevron-right" size={18} color={colors.mutedForeground} /></Pressable>)}</View>
           <Text style={[styles.rosterTitle, { color: colors.foreground }]}>Partecipanti ({group.participantCount})</Text>
           <View style={styles.roster}>{group.participants.map((participant) => <Surface key={participant.id} style={styles.person}><Text style={[styles.personName, { color: colors.foreground }]}>{participant.displayName}{participant.isOrganizer ? ' ✨' : ''}</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{participant.isOrganizer ? 'Organizzatore' : 'Nel gruppo'}</Text></Surface>)}</View>
@@ -349,15 +353,16 @@ export default function GroupSessionScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Riapri il countdown"
+              testID="active-moment-banner"
               onPress={() => router.push({
                 pathname: '/moment/[id]',
-                params: { id: group.id, experienceId: group.id, reminderId: momentReminderId, scheduledAt: momentScheduledAt, source: 'session' },
+        params: { id: group.id, experienceId: group.id, reminderId: activeMomentReminderId, scheduledAt: activeMomentScheduledAt, source: 'session' },
               })}
               style={[styles.momentBanner, { backgroundColor: colors.secondary }]}
             >
               <View style={[styles.momentIcon, { backgroundColor: colors.primary }]}><Feather name="camera" size={16} color={colors.primaryForeground} /></View>
               <View style={styles.momentCopy}><Text style={[styles.momentKicker, { color: colors.primary }]}>RICORDO IN CORSO</Text><Text style={[styles.momentTitle, { color: colors.foreground }]}>Tempo rimasto</Text></View>
-              <Text style={[styles.momentCountdown, { color: colors.primary }]}>{formatCountdown(momentRemaining)}</Text>
+              <Text testID="active-moment-countdown" style={[styles.momentCountdown, { color: colors.primary }]}>{formatCountdown(momentRemaining)}</Text>
               <Feather name="chevron-right" size={19} color={colors.primary} />
             </Pressable>
           ) : null}
@@ -377,7 +382,7 @@ export default function GroupSessionScreen() {
       )}
 
       <Modal visible={Boolean(editing)} transparent animationType="fade" onRequestClose={() => setEditing(null)}>
-        <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}><View style={[styles.pickerSheet, { backgroundColor: colors.background }]}><Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text><Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>Tra {group.windowStart} e {group.windowEnd}</Text><View style={[styles.picker, { borderColor: colors.border }]}><ScrollView ref={hourPickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToEditingTime(editing)}>{hours.map((hour) => <Pressable key={hour} onPress={() => setEditing((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, editing?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: editing?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}</ScrollView><Text style={[styles.colon, { color: colors.foreground }]}>:</Text><ScrollView ref={minutePickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToEditingTime(editing)}>{minuteOptions.map((minute) => <Pressable key={minute} onPress={() => setEditing((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, editing?.minute === minute ? { backgroundColor: colors.primary } : undefined]}><Text style={[styles.timeOptionText, { color: editing?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}</ScrollView></View><PrimaryButton label="Conferma orario" icon="check" onPress={saveReminder} loading={updateReminder.isPending} /><Pressable onPress={() => setEditing(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable></View></View>
+        <View style={[styles.modal, { backgroundColor: colors.foreground + '77' }]}><View style={[styles.pickerSheet, { backgroundColor: colors.background }]}><Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text><Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>Tra {group.windowStart} e {group.windowEnd}</Text><View style={[styles.picker, { borderColor: colors.border }]}><ScrollView ref={hourPickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToEditingTime(editing)}>{hours.map((hour) => <Pressable key={hour} testID={`time-hour-${String(hour).padStart(2, '0')}`} onPress={() => setEditing((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, editing?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: editing?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}</ScrollView><Text style={[styles.colon, { color: colors.foreground }]}>:</Text><ScrollView ref={minutePickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToEditingTime(editing)}>{minuteOptions.map((minute) => <Pressable key={minute} testID={`time-minute-${String(minute).padStart(2, '0')}`} onPress={() => setEditing((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, editing?.minute === minute ? { backgroundColor: colors.primary } : undefined]}><Text style={[styles.timeOptionText, { color: editing?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}</ScrollView></View><PrimaryButton label="Conferma orario" icon="check" onPress={saveReminder} loading={updateReminder.isPending} /><Pressable onPress={() => setEditing(null)} style={styles.cancel}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Annulla</Text></Pressable></View></View>
       </Modal>
     </Screen>
   );
@@ -396,7 +401,7 @@ const styles = StyleSheet.create({
   rosterTitle: { fontFamily: 'Inter_700Bold', fontSize: 17, marginTop: 27, marginBottom: 10 }, roster: { gap: 8, marginTop: 20 }, person: { minHeight: 56, paddingVertical: 11, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, personName: { fontFamily: 'Inter_700Bold', fontSize: 15 }, personRole: { fontFamily: 'Inter_400Regular', fontSize: 13 },
   waitNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 4 }, waitEmoji: { fontSize: 16 }, waitText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
   momentBanner: { marginTop: 20, minHeight: 70, borderRadius: 19, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, momentIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, momentCopy: { flex: 1 }, momentKicker: { fontFamily: 'Inter_700Bold', fontSize: 9, letterSpacing: 1.2 }, momentTitle: { fontFamily: 'Inter_500Medium', fontSize: 13, marginTop: 3 }, momentCountdown: { fontFamily: 'Inter_700Bold', fontSize: 18, fontVariant: ['tabular-nums'] }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
-  testCard: { marginTop: 16, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11 }, testIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, testCopy: { flex: 1 }, testTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 }, testBody: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16, marginTop: 3 }, testButton: { minWidth: 62, minHeight: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8 }, testButtonLabel: { fontFamily: 'Inter_700Bold', fontSize: 10 }, pressed: { opacity: 0.8, transform: [{ scale: 0.96 }] },
+  pressed: { opacity: 0.8, transform: [{ scale: 0.96 }] },
   eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 }, zipHint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 10, paddingHorizontal: 14 },
   modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumnScroll: { flex: 1, alignSelf: 'stretch' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
 });

@@ -15,17 +15,28 @@ import { Stack, router, useRootNavigationState } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { ActivityIndicator, Platform, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, View } from 'react-native';
 import { setBaseUrl, setGuestIdentityGetter } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
-import { activateReminder } from '@/constants/activeReminder';
 import { ensurePhotoReminderChannel } from '@/constants/notifications';
+import type { PhotoPromptVariant } from '@/constants/photoPrompts';
+import { CLOSED_EXPERIENCES_STORAGE_KEY, rememberClosedExperience } from '@/constants/experience';
+import { clearActiveReminder, loadActiveReminder, saveActiveReminder, type ActiveReminder } from '@/constants/activeReminder';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+const developmentDomain = process.env.EXPO_PUBLIC_REPLIT_DEV_DOMAIN?.trim();
+const developmentApiBaseUrl =
+  configuredApiBaseUrl ||
+  (developmentDomain ? `https://${developmentDomain}` : '');
+const apiBaseUrl = __DEV__ ? developmentApiBaseUrl : configuredApiBaseUrl;
 if (!apiBaseUrl) {
-  throw new Error('EXPO_PUBLIC_API_URL is required. Configure it with the stable API deployment URL before building the app.');
+  throw new Error(
+    __DEV__
+      ? 'Development API URL is unavailable. Start the app through the Replit Expo workflow so REPLIT_DEV_DOMAIN can be injected.'
+      : 'EXPO_PUBLIC_API_URL is required. Configure it with the stable API deployment URL before building the app.'
+  );
 }
 if (!/^https:\/\//i.test(apiBaseUrl)) {
   throw new Error('EXPO_PUBLIC_API_URL must be an absolute HTTPS URL.');
@@ -36,31 +47,97 @@ if (!__DEV__ && new URL(apiBaseUrl).hostname.endsWith('.replit.dev')) {
 setBaseUrl(apiBaseUrl);
 
 const queryClient = new QueryClient();
+const PHOTO_WINDOW_MS = 15 * 60 * 1000;
+const TEST_PHOTO_WINDOW_MS = 30 * 1000;
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+  handleNotification: async (notification) => {
+    const data = notification.request.content.data;
+    const experienceId = typeof data?.experienceId === 'string' ? data.experienceId : '';
+    const isTest = data?.test === true || data?.test === 'true';
+    const shouldPresent = isTest || !experienceId || !await isExperienceClosedRemotely(experienceId);
+    return {
+      shouldShowBanner: shouldPresent,
+      shouldShowList: shouldPresent,
+      shouldPlaySound: shouldPresent,
+      shouldSetBadge: false,
+    };
+  },
 });
 
-function openPhotoMoment(notification: Notifications.Notification) {
+function notificationMomentKey(notification: Notifications.Notification) {
   const data = notification.request.content.data;
-  const experienceId = data?.experienceId;
-  if (typeof experienceId !== 'string') return false;
-  const isTest = data?.test === true || data?.test === 'true';
-  const scheduledAt = typeof data?.scheduledAt === 'string' ? data.scheduledAt : '';
-  if (!scheduledAt || !Number.isFinite(new Date(scheduledAt).getTime())) return false;
-  if (!isTest && !activateReminder(data)) return false;
+  if (typeof data?.experienceId !== 'string' || typeof data?.scheduledAt !== 'string') return notification.request.identifier;
+  return `${data.experienceId}:${typeof data.reminderId === 'string' ? data.reminderId : data.scheduledAt}`;
+}
+
+async function isExperienceLocallyClosed(experienceId: string) {
+  const stored = await AsyncStorage.getItem(CLOSED_EXPERIENCES_STORAGE_KEY);
+  if (!stored) return false;
+  try {
+    const closedExperiences = JSON.parse(stored) as unknown;
+    return Array.isArray(closedExperiences) && closedExperiences.includes(experienceId);
+  } catch {
+    return false;
+  }
+}
+
+async function isExperienceClosedRemotely(experienceId: string) {
+  if (await isExperienceLocallyClosed(experienceId)) return true;
+  try {
+    const guestId = await AsyncStorage.getItem('pic-sync-guest-id');
+    const response = await fetch(`${apiBaseUrl}/api/experiences/${encodeURIComponent(experienceId)}`, {
+      headers: guestId ? { 'x-pic-sync-guest-id': guestId } : undefined,
+    });
+    if (!response.ok) return response.status === 404 || response.status === 403;
+    const payload = await response.json() as { sessionStatus?: unknown };
+    if (payload.sessionStatus === 'closed') {
+      await rememberClosedExperience(experienceId);
+      return true;
+    }
+    return false;
+  } catch {
+    // A temporary network failure must not prevent an already-received
+    // reminder from opening while the user is offline.
+    return false;
+  }
+}
+
+async function openPhotoMomentData(active: ActiveReminder, messageVariant?: PhotoPromptVariant) {
+  const scheduledTime = new Date(active.scheduledAt).getTime();
+  const duration = active.isTest ? TEST_PHOTO_WINDOW_MS : PHOTO_WINDOW_MS;
+  if (!Number.isFinite(scheduledTime) || scheduledTime + duration <= Date.now()) return false;
+  if (!active.isTest && await isExperienceClosedRemotely(active.experienceId)) return false;
+  await saveActiveReminder(active);
   router.push({
     pathname: '/moment/[id]',
     params: {
-      id: experienceId,
-      experienceId,
-      reminderId: typeof data.reminderId === 'string' ? data.reminderId : '',
-      scheduledAt,
-      test: isTest ? 'true' : '',
-      notificationId: notification.request.identifier,
+      id: active.experienceId,
+      experienceId: active.experienceId,
+      reminderId: active.reminderId ?? '',
+      scheduledAt: active.scheduledAt,
+      test: active.isTest ? 'true' : '',
+      notificationId: active.notificationId ?? '',
+      messageVariant: messageVariant ?? '',
     },
   });
   return true;
+}
+
+async function openPhotoMoment(notification: Notifications.Notification) {
+  const data = notification.request.content.data;
+  const experienceId = data?.experienceId;
+  if (typeof experienceId !== 'string') return false;
+  const scheduledAt = typeof data.scheduledAt === 'string' ? data.scheduledAt : new Date(notification.date).toISOString();
+  const isTest = data?.test === true || data?.test === 'true';
+  const messageVariant = data?.messageVariant === 'special' || data?.messageVariant === 'normal' ? data.messageVariant : undefined;
+  return openPhotoMomentData({
+    experienceId,
+    reminderId: typeof data.reminderId === 'string' ? data.reminderId : undefined,
+    scheduledAt,
+    isTest,
+    notificationId: notification.request.identifier,
+  }, messageVariant);
 }
 
 function GuestIdentityBootstrap({ children }: PropsWithChildren) {
@@ -104,8 +181,8 @@ function RootLayoutNav() {
       <Stack.Screen name="join" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/create" options={{ presentation: 'modal' }} />
       <Stack.Screen name="experience/[id]" />
-      <Stack.Screen name="moment/[id]" options={{ presentation: 'fullScreenModal', gestureEnabled: true }} />
-      <Stack.Screen name="capture/[id]" />
+      <Stack.Screen name="moment/[id]" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
+      <Stack.Screen name="capture/[id]" options={{ gestureEnabled: false }} />
     </Stack>
   );
 }
@@ -132,27 +209,55 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!rootNavigationState?.key) return;
-    const handleResponseNotification = (notification: Notifications.Notification) => {
-      const notificationId = notification.request.identifier;
-      if (handledNotificationIds.current.has(notificationId)) return;
-      if (openPhotoMoment(notification)) handledNotificationIds.current.add(notificationId);
-    };
-    const handleReceivedNotification = (notification: Notifications.Notification) => {
-      // In foreground keep the participant in the session and update its
-      // countdown state. Navigation is reserved for an explicit notification tap.
-      activateReminder(notification.request.content.data);
+    const handleNotification = (notification: Notifications.Notification) => {
+      const notificationKey = notificationMomentKey(notification);
+      if (handledNotificationIds.current.has(notificationKey)) return;
+      handledNotificationIds.current.add(notificationKey);
+      void openPhotoMoment(notification).then((opened) => {
+        if (!opened) handledNotificationIds.current.delete(notificationKey);
+      });
     };
     const handleResponse = async (response: Notifications.NotificationResponse | null) => {
       if (!response) return;
-      handleResponseNotification(response.notification);
+      handleNotification(response.notification);
       if (Platform.OS !== 'web') await Notifications.clearLastNotificationResponseAsync();
     };
-    const receivedSubscription = Notifications.addNotificationReceivedListener(handleReceivedNotification);
+    const recoverActiveNotification = async () => {
+      if (Platform.OS === 'web') return;
+      const active = await loadActiveReminder();
+      if (active) {
+        const start = new Date(active.scheduledAt).getTime();
+        const duration = active.isTest ? TEST_PHOTO_WINDOW_MS : PHOTO_WINDOW_MS;
+        const notificationKey = `${active.experienceId}:${active.reminderId ?? active.scheduledAt}`;
+        if (Number.isFinite(start) && start <= Date.now() && start + duration > Date.now() && !handledNotificationIds.current.has(notificationKey)) {
+          handledNotificationIds.current.add(notificationKey);
+          const opened = await openPhotoMomentData(active);
+          if (opened) return;
+          handledNotificationIds.current.delete(notificationKey);
+        }
+      }
+      await clearActiveReminder();
+      const presented = await Notifications.getPresentedNotificationsAsync();
+      const activeNotification = presented
+        .filter((notification) => {
+          const data = notification.request.content.data;
+          const start = typeof data?.scheduledAt === 'string' ? new Date(data.scheduledAt).getTime() : NaN;
+          return typeof data?.experienceId === 'string' && Number.isFinite(start) && start <= Date.now() && start + PHOTO_WINDOW_MS > Date.now();
+        })
+        .sort((a, b) => b.date - a.date)[0];
+      if (activeNotification) handleNotification(activeNotification);
+    };
+    const receivedSubscription = Notifications.addNotificationReceivedListener(handleNotification);
     const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => void handleResponse(response));
     if (Platform.OS !== 'web') void Notifications.getLastNotificationResponseAsync().then(handleResponse);
+    if (Platform.OS !== 'web') void recoverActiveNotification();
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void recoverActiveNotification();
+    });
     return () => {
       receivedSubscription.remove();
       responseSubscription.remove();
+      appStateSubscription.remove();
     };
   }, [rootNavigationState?.key]);
 
