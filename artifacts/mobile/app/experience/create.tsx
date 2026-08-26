@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ApiError, ResponseParseError, useCreateExperience } from '@workspace/api-client-react';
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { AppHeader, PrimaryButton, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
+import { pickerOffsetForIndex } from '@/constants/timePicker';
 
 const options = [6, 12, 18, 24, 30, 36];
 
@@ -53,6 +54,8 @@ function createGroupErrorMessage(error: unknown) {
 export default function CreateGroupScreen() {
   const colors = useColors();
   const router = useRouter();
+  const hourPickerRef = useRef<ScrollView>(null);
+  const minutePickerRef = useRef<ScrollView>(null);
   const createGroup = useCreateExperience();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [organizerName, setOrganizerName] = useState('');
@@ -61,6 +64,17 @@ export default function CreateGroupScreen() {
   const [windowEnd, setWindowEnd] = useState('18:00');
   const [created, setCreated] = useState<{ id: string; inviteCode: string } | null>(null);
   const [timePicker, setTimePicker] = useState<{ field: 'start' | 'end'; hour: number; minute: number } | null>(null);
+  const scrollToTime = (selection: typeof timePicker) => {
+    if (!selection) return;
+    hourPickerRef.current?.scrollTo({ y: pickerOffsetForIndex(selection.hour), animated: false });
+    minutePickerRef.current?.scrollTo({ y: pickerOffsetForIndex(selection.minute), animated: false });
+  };
+
+  useEffect(() => {
+    if (!timePicker) return;
+    const frame = requestAnimationFrame(() => scrollToTime(timePicker));
+    return () => cancelAnimationFrame(frame);
+  }, [timePicker]);
 
   const submit = async () => {
     if (!/^\d{2}:\d{2}$/.test(windowStart) || !/^\d{2}:\d{2}$/.test(windowEnd) || todayAt(windowEnd) <= todayAt(windowStart)) {
@@ -144,11 +158,11 @@ export default function CreateGroupScreen() {
             <Text style={[styles.pickerTitle, { color: colors.foreground }]}>Scegli l&apos;orario</Text>
             <Text style={[styles.pickerHint, { color: colors.mutedForeground }]}>{timePicker?.field === 'start' ? 'Inizio della fascia' : 'Fine della fascia'}</Text>
             <View style={[styles.picker, { borderColor: colors.border }]}>
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>
+              <ScrollView ref={hourPickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToTime(timePicker)}>
                 {Array.from({ length: 24 }, (_, hour) => <Pressable key={hour} accessibilityRole="button" accessibilityLabel={`Ora ${String(hour).padStart(2, '0')}`} testID={`time-hour-${String(hour).padStart(2, '0')}`} onPress={() => setTimePicker((value) => value ? { ...value, hour } : value)} style={[styles.timeOption, timePicker?.hour === hour && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: timePicker?.hour === hour ? colors.primaryForeground : colors.foreground }]}>{String(hour).padStart(2, '0')}</Text></Pressable>)}
               </ScrollView>
               <Text style={[styles.colon, { color: colors.foreground }]}>:</Text>
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn}>
+              <ScrollView ref={minutePickerRef} style={styles.pickerColumnScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.pickerColumn} onContentSizeChange={() => scrollToTime(timePicker)}>
                 {Array.from({ length: 60 }, (_, minute) => <Pressable key={minute} accessibilityRole="button" accessibilityLabel={`Minuti ${String(minute).padStart(2, '0')}`} testID={`time-minute-${String(minute).padStart(2, '0')}`} onPress={() => setTimePicker((value) => value ? { ...value, minute } : value)} style={[styles.timeOption, timePicker?.minute === minute && { backgroundColor: colors.primary }]}><Text style={[styles.timeOptionText, { color: timePicker?.minute === minute ? colors.primaryForeground : colors.foreground }]}>{String(minute).padStart(2, '0')}</Text></Pressable>)}
               </ScrollView>
             </View>
@@ -183,6 +197,7 @@ const styles = StyleSheet.create({
   pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' },
   pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 },
   picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' },
+  pickerColumnScroll: { flex: 1, alignSelf: 'stretch' },
   pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 },
   timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 },

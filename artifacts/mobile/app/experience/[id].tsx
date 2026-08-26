@@ -16,6 +16,7 @@ import { useColors } from '@/hooks/useColors';
 import { PHOTO_WINDOW_MS, useActiveReminder } from '@/constants/activeReminder';
 import { ensurePhotoReminderChannel, PHOTO_REMINDER_CHANNEL, PHOTO_REMINDER_SOUND } from '@/constants/notifications';
 import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
+import { pickerOffsetForIndex } from '@/constants/timePicker';
 
 function partsFor(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
@@ -52,10 +53,6 @@ type TestNotificationState = 'idle' | 'scheduled';
 type AlbumMemory = { id: string; imageUri: string; authorName: string; capturedAt: string };
 
 const TEST_NOTIFICATION_DELAY_SECONDS = 5;
-const PICKER_HEIGHT = 216;
-const PICKER_OPTION_HEIGHT = 43;
-const PICKER_OPTION_GAP = 6;
-const PICKER_COLUMN_PADDING = 76;
 const BASE64_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function sanitizeFilePart(value: string) {
@@ -296,12 +293,6 @@ export default function GroupSessionScreen() {
       return value >= toMinutes(group.windowStart) && value <= toMinutes(group.windowEnd);
     });
   }, [editing, group?.windowEnd, group?.windowStart]);
-  const pickerOffsetForIndex = (index: number) => Math.max(
-    0,
-    PICKER_COLUMN_PADDING +
-      index * (PICKER_OPTION_HEIGHT + PICKER_OPTION_GAP) -
-      (PICKER_HEIGHT - PICKER_OPTION_HEIGHT) / 2,
-  );
   const scrollToEditingTime = (selection: EditingReminder | null) => {
     if (!selection) return;
     const hourIndex = Math.max(0, hours.indexOf(selection.hour));
