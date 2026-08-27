@@ -14,6 +14,7 @@ import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View }
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 import { LAST_EXPERIENCE_ID_STORAGE_KEY, rememberClosedExperience, resolveExperienceId } from '@/constants/experience';
+import { ensurePhotoReminderChannel } from '@/constants/notifications';
 import { pickerOffsetForIndex } from '@/constants/timePicker';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
@@ -170,6 +171,7 @@ export default function GroupSessionScreen() {
 
     const registerThisDevice = async () => {
       try {
+        await ensurePhotoReminderChannel();
         const currentPermission = await Notifications.getPermissionsAsync();
         const permission = currentPermission.granted ? currentPermission : await Notifications.requestPermissionsAsync();
         if (!permission.granted) return;

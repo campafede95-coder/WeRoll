@@ -41,6 +41,7 @@
       [
         "expo-notifications",
         {
+          "defaultChannel": "pic-sync-reminders-v3",
           "sounds": [
             "./assets/sounds/photo_reminder.mp3"
           ]
@@ -68,6 +69,6 @@
     },
    "updates": {
       "url": "https://u.expo.dev/cafdfc07-0d4a-4cfc-89af-5dea647808d5"
-    },
+    }
   }
 }
