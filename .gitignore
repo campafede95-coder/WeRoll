@@ -47,6 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+artifacts/mobile/google-services.json
 
 # macOS metadata
 ._*
