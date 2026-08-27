@@ -1,8 +1,8 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-export const PHOTO_REMINDER_CHANNEL = 'pic-sync-reminders-v2';
-export const PHOTO_REMINDER_SOUND = 'photo-reminder.mp3';
+export const PHOTO_REMINDER_CHANNEL = 'pic-sync-reminders-v3';
+export const PHOTO_REMINDER_SOUND = 'photo_reminder.mp3';
 
 export async function ensurePhotoReminderChannel() {
   if (Platform.OS !== 'android') return null;

@@ -55,7 +55,7 @@ Notifications.setNotificationHandler({
     const data = notification.request.content.data;
     const experienceId = typeof data?.experienceId === 'string' ? data.experienceId : '';
     const isTest = data?.test === true || data?.test === 'true';
-    const shouldPresent = isTest || !experienceId || !await isExperienceClosedRemotely(experienceId);
+    const shouldPresent = isTest || !experienceId || !await isExperienceLocallyClosed(experienceId);
     return {
       shouldShowBanner: shouldPresent,
       shouldShowList: shouldPresent,
