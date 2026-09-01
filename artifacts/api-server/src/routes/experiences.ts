@@ -136,6 +136,7 @@ async function processExpoPushReceipts() {
 }
 
 export async function deliverDuePhotoReminders() {
+  logger.info("[REMINDER WORKER] tick");
   try {
     await processExpoPushReceipts();
   } catch (error) {
@@ -185,7 +186,9 @@ export async function deliverDuePhotoReminders() {
       lte(remindersTable.scheduledAt, now),
       gte(remindersTable.scheduledAt, new Date(now.getTime() - PHOTO_WINDOW_MS)),
     ));
+  logger.info(`[REMINDER WORKER] due reminders = ${dueReminders.length}`);
   for (const { reminder, experience, organizerName } of dueReminders) {
+    logger.info(`[REMINDER WORKER] processing reminder ${reminder.id} experience ${experience.id}`);
     try {
       const currentExperience = await db.select({ sessionStatus: experiencesTable.sessionStatus })
         .from(experiencesTable)
@@ -197,7 +200,10 @@ export async function deliverDuePhotoReminders() {
       const userIds = members.map((member) => member.userId);
       const tokens = userIds.length ? await db.select({ token: pushTokensTable.token }).from(pushTokensTable)
         .where(inArray(pushTokensTable.userId, userIds)) : [];
-      if (!tokens.length) continue;
+      if (!tokens.length) {
+        logger.info(`[REMINDER WORKER] no tokens for reminder ${reminder.id}`);
+        continue;
+      }
 
       await db.insert(reminderDeliveriesTable).values(tokens.map(({ token }) => ({
         id: `${reminder.id}:${token}`,
@@ -261,7 +267,9 @@ export async function deliverDuePhotoReminders() {
           }));
           let tickets: ExpoPushTicket[];
           try {
+            logger.info(`[REMINDER WORKER] sending ${batch.length} notifications to Expo`);
             tickets = await sendExpoPushBatch(batch);
+            logger.info(`[REMINDER WORKER] Expo tickets received ${tickets.length}`);
           } catch (error) {
             transportFailureCount += batch.length;
             for (const delivery of batchDeliveries) {
