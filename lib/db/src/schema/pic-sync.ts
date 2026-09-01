@@ -52,6 +52,19 @@ export const pushTokensTable = pgTable("pic_sync_push_tokens", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const reminderDeliveriesTable = pgTable("pic_sync_reminder_deliveries", {
+  id: text("id").primaryKey(),
+  reminderId: text("reminder_id").notNull(),
+  token: text("token").notNull(),
+  status: text("status").notNull().default("pending"),
+  ticketId: text("ticket_id"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  leaseOwner: text("lease_owner"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const memoriesTable = pgTable("pic_sync_memories", {
   id: text("id").primaryKey(),
   experienceId: text("experience_id").notNull(),
