@@ -26,3 +26,8 @@ packages = ["nano", "vim-full", "python311Full"]
 [[ports]]
 localPort = 5000
 externalPort = 5000
+
+[userenv]
+
+[userenv.production]
+EXPO_PUBLIC_API_URL = "https://memory-capture-collective.replit.app"
