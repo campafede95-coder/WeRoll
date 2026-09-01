@@ -136,7 +136,6 @@ async function processExpoPushReceipts() {
 }
 
 export async function deliverDuePhotoReminders() {
-  logger.info("[REMINDER WORKER] tick");
   try {
     await processExpoPushReceipts();
   } catch (error) {
@@ -186,9 +185,7 @@ export async function deliverDuePhotoReminders() {
       lte(remindersTable.scheduledAt, now),
       gte(remindersTable.scheduledAt, new Date(now.getTime() - PHOTO_WINDOW_MS)),
     ));
-  logger.info(`[REMINDER WORKER] due reminders = ${dueReminders.length}`);
   for (const { reminder, experience, organizerName } of dueReminders) {
-    logger.info(`[REMINDER WORKER] processing reminder ${reminder.id} experience ${experience.id}`);
     try {
       const currentExperience = await db.select({ sessionStatus: experiencesTable.sessionStatus })
         .from(experiencesTable)
@@ -200,10 +197,7 @@ export async function deliverDuePhotoReminders() {
       const userIds = members.map((member) => member.userId);
       const tokens = userIds.length ? await db.select({ token: pushTokensTable.token }).from(pushTokensTable)
         .where(inArray(pushTokensTable.userId, userIds)) : [];
-      if (!tokens.length) {
-        logger.info(`[REMINDER WORKER] no tokens for reminder ${reminder.id}`);
-        continue;
-      }
+      if (!tokens.length) continue;
 
       await db.insert(reminderDeliveriesTable).values(tokens.map(({ token }) => ({
         id: `${reminder.id}:${token}`,
@@ -267,9 +261,7 @@ export async function deliverDuePhotoReminders() {
           }));
           let tickets: ExpoPushTicket[];
           try {
-            logger.info(`[REMINDER WORKER] sending ${batch.length} notifications to Expo`);
             tickets = await sendExpoPushBatch(batch);
-            logger.info(`[REMINDER WORKER] Expo tickets received ${tickets.length}`);
           } catch (error) {
             transportFailureCount += batch.length;
             for (const delivery of batchDeliveries) {
@@ -594,7 +586,6 @@ router.post("/:experienceId/push-token", async (req, res) => {
 router.post("/:experienceId/test-push", async (req, res) => {
   const userId = guest(req, res);
   if (!userId) return;
-  if (!await canAccess(req.params.experienceId, userId)) return res.status(403).json({ error: "Forbidden" });
 
   const experience = await db.select({
     id: experiencesTable.id,
@@ -602,48 +593,51 @@ router.post("/:experienceId/test-push", async (req, res) => {
     sessionStatus: experiencesTable.sessionStatus,
   }).from(experiencesTable).where(eq(experiencesTable.id, req.params.experienceId)).limit(1);
   if (!experience[0]) return res.status(404).json({ error: "Group not found" });
+  if (!await canAccess(experience[0].id, userId)) return res.status(403).json({ error: "Forbidden" });
   if (experience[0].sessionStatus !== "active") {
     return res.status(409).json({ error: "The session must be active to send a test notification" });
   }
 
-  const tokens = await db.select({
-    token: pushTokensTable.token,
-  }).from(pushTokensTable).where(eq(pushTokensTable.userId, userId));
+  const members = await db.select({ userId: participantsTable.userId }).from(participantsTable)
+    .where(eq(participantsTable.experienceId, experience[0].id));
+  const memberIds = [...new Set(members.map(({ userId: memberId }) => memberId))];
+  const tokenRows = memberIds.length
+    ? await db.select({ token: pushTokensTable.token }).from(pushTokensTable)
+      .where(inArray(pushTokensTable.userId, memberIds))
+    : [];
+  const tokens = [...new Set(tokenRows.map(({ token }) => token))];
   if (!tokens.length) {
-    return res.status(409).json({ error: "No push token is registered for this device" });
+    return res.status(409).json({ error: "No push token is registered for the participants" });
   }
 
+  let tickets: ExpoPushTicket[];
   try {
-    const response = await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(tokens.map(({ token }) => ({
-        to: token,
-        title: "Test notifica · WeRoll",
-        body: `Notifica di prova per la sessione “${experience[0].name}”.`,
-        sound: REMINDER_SOUND,
-        priority: "high",
-        channelId: REMINDER_CHANNEL,
-        data: { testNotification: true },
-      }))),
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
-
-    const payload = await response.json() as { data?: Array<{ status?: string }> };
-    if (!Array.isArray(payload.data) || payload.data.length !== tokens.length) {
-      throw new Error("Expo push service returned an invalid ticket response");
-    }
-
-    const sent = payload.data.filter((ticket) => ticket.status === "ok").length;
-    if (!sent) {
-      return res.status(502).json({ error: "Expo ha rifiutato la notifica di prova. Verifica i permessi e riprova." });
-    }
-    return res.json({ sent, attempted: tokens.length });
+    tickets = await sendExpoPushBatch(tokens.map((token) => ({
+      to: token,
+      title: "Test notifica · WeRoll",
+      body: `Notifica di prova per la sessione “${experience[0].name}”.`,
+      sound: REMINDER_SOUND,
+      priority: "high",
+      channelId: REMINDER_CHANNEL,
+      data: { testNotification: true },
+    })));
   } catch (error) {
     logger.warn({ err: error, experienceId: experience[0].id }, "Test push transport failed");
     return res.status(502).json({ error: "Expo non ha accettato la notifica di prova. Riprova tra poco." });
   }
+
+  const invalidTokens = tickets.flatMap((ticket, index) => (
+    ticket.details?.error && INVALID_EXPO_TOKEN_ERRORS.has(ticket.details.error) ? [tokens[index]] : []
+  ));
+  if (invalidTokens.length) {
+    await db.delete(pushTokensTable).where(inArray(pushTokensTable.token, invalidTokens));
+  }
+
+  const sent = tickets.filter((ticket) => ticket.status === "ok").length;
+  if (!sent) {
+    return res.status(502).json({ error: "Expo ha rifiutato la notifica di prova. Verifica i permessi e riprova." });
+  }
+  return res.json({ sent, attempted: tokens.length });
 });
 
 router.post("/:experienceId/close", async (req, res) => {
