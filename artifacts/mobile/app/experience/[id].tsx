@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 import { zipSync } from 'fflate';
-import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useRegisterPushToken, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
+import { getGetExperienceQueryKey, useCloseExperience, useGetExperience, useRegisterPushToken, useSendTestPush, useStartExperience, useUpdateReminder } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
@@ -51,6 +51,7 @@ function toMinutes(time?: string | null) {
 
 type EditingReminder = { id: string; hour: number; minute: number } | null;
 type AlbumMemory = { id: string; imageUri: string; authorName: string; capturedAt: string };
+type TestPushStatus = { tone: 'success' | 'error'; message: string } | null;
 
 const BASE64_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -116,7 +117,9 @@ export default function GroupSessionScreen() {
   const close = useCloseExperience();
   const updateReminder = useUpdateReminder();
   const registerPushToken = useRegisterPushToken();
+  const testPush = useSendTestPush();
   const [editing, setEditing] = useState<EditingReminder>(null);
+  const [testPushStatus, setTestPushStatus] = useState<TestPushStatus>(null);
   const [isExportingAlbum, setIsExportingAlbum] = useState(false);
   const [now, setNow] = useState(Date.now());
   const group = query.data;
@@ -262,6 +265,27 @@ export default function GroupSessionScreen() {
   }, [group?.id, group?.sessionStatus]);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(experienceId) });
+  const sendTestNotification = () => {
+    if (!experienceId || testPush.isPending) return;
+    setTestPushStatus(null);
+    testPush.mutate({ experienceId }, {
+      onSuccess: ({ sent, attempted }) => {
+        setTestPushStatus({
+          tone: 'success',
+          message: `${sent} di ${attempted} notifiche accettate per l’invio.`,
+        });
+      },
+      onError: (error) => {
+        const status = typeof error === 'object' && error && 'status' in error ? error.status : undefined;
+        setTestPushStatus({
+          tone: 'error',
+          message: status === 409
+            ? 'Nessun token push registrato. Apri questa sessione sul telefono, consenti le notifiche e riprova.'
+            : 'Notifica non inviata. Verifica la connessione e riprova.',
+        });
+      },
+    });
+  };
   const startSession = () => { if (experienceId) start.mutate({ experienceId }, { onSuccess: refresh }); };
   const closeSession = () => {
     if (!experienceId) return;
@@ -405,6 +429,21 @@ export default function GroupSessionScreen() {
             </Pressable>
           ) : null}
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Ad ogni notifica hai 15 minuti per catturare il tuo ricordo.{'\n\n'}Ma niente pressione se non riesci: goditi il momento e scatta quando vuoi!</Text>
+          <Surface style={styles.testPushCard}>
+            <View style={styles.testPushCopy}>
+              <Text style={[styles.personName, { color: colors.foreground }]}>Test notifiche</Text>
+              <Text style={[styles.personRole, { color: colors.mutedForeground }]}>Invia una push a questo telefono per verificare permessi, suono e canale.</Text>
+            </View>
+            <PrimaryButton label="Invia test" icon="bell" variant="soft" onPress={sendTestNotification} loading={testPush.isPending} />
+            {testPushStatus ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                style={[styles.testPushStatus, { color: testPushStatus.tone === 'success' ? colors.primary : colors.destructive }]}
+              >
+                {testPushStatus.message}
+              </Text>
+            ) : null}
+          </Surface>
           <PrimaryButton
             label="Scatto libero"
             icon="camera"
@@ -438,7 +477,7 @@ const styles = StyleSheet.create({
   listTitle: { fontFamily: 'Inter_700Bold', fontSize: 18, letterSpacing: -0.25, marginTop: 25, marginBottom: 11 }, reminderList: { gap: 9 }, reminder: { minHeight: 67, borderWidth: 1, borderRadius: 17, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', gap: 16 }, reminderHour: { fontFamily: 'Inter_700Bold', fontSize: 26, letterSpacing: -0.5, flex: 1 },
   rosterTitle: { fontFamily: 'Inter_700Bold', fontSize: 17, marginTop: 27, marginBottom: 10 }, roster: { gap: 8, marginTop: 20 }, person: { minHeight: 56, paddingVertical: 11, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, personName: { fontFamily: 'Inter_700Bold', fontSize: 15 }, personRole: { fontFamily: 'Inter_400Regular', fontSize: 13 },
   waitNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, paddingHorizontal: 4 }, waitEmoji: { fontSize: 16 }, waitText: { fontFamily: 'Inter_400Regular', fontSize: 14 },
-  momentBanner: { marginTop: 20, minHeight: 70, borderRadius: 19, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, momentIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, momentCopy: { flex: 1 }, momentKicker: { fontFamily: 'Inter_700Bold', fontSize: 9, letterSpacing: 1.2 }, momentTitle: { fontFamily: 'Inter_500Medium', fontSize: 13, marginTop: 3 }, momentCountdown: { fontFamily: 'Inter_700Bold', fontSize: 18, fontVariant: ['tabular-nums'] }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  momentBanner: { marginTop: 20, minHeight: 70, borderRadius: 19, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }, momentIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, momentCopy: { flex: 1 }, momentKicker: { fontFamily: 'Inter_700Bold', fontSize: 9, letterSpacing: 1.2 }, momentTitle: { fontFamily: 'Inter_500Medium', fontSize: 13, marginTop: 3 }, momentCountdown: { fontFamily: 'Inter_700Bold', fontSize: 18, fontVariant: ['tabular-nums'] }, testPushCard: { marginTop: 20, padding: 14, gap: 13 }, testPushCopy: { gap: 4 }, testPushStatus: { fontFamily: 'Inter_500Medium', fontSize: 12, lineHeight: 17, textAlign: 'center' }, albumPreview: { marginTop: 20, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 11 }, closeSession: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 20 }, closeText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
   pressed: { opacity: 0.8, transform: [{ scale: 0.96 }] },
   eyebrow: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1.6, marginTop: 11 }, title: { fontFamily: 'Inter_700Bold', fontSize: 31, lineHeight: 35, letterSpacing: -1, marginTop: 9 }, album: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 22 }, memory: { width: '48%' }, memoryImage: { aspectRatio: 0.9, borderRadius: 17 }, memoryAuthor: { fontFamily: 'Inter_700Bold', fontSize: 12, marginTop: 6 }, zipHint: { fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 19, textAlign: 'center', marginTop: 10, paddingHorizontal: 14 },
   modal: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 }, pickerSheet: { width: '100%', maxWidth: 360, borderRadius: 25, padding: 21 }, pickerTitle: { fontFamily: 'Inter_700Bold', fontSize: 21, textAlign: 'center' }, pickerHint: { fontFamily: 'Inter_400Regular', fontSize: 13, textAlign: 'center', marginTop: 5, marginBottom: 17 }, picker: { height: 216, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 18, overflow: 'hidden' }, pickerColumnScroll: { flex: 1, alignSelf: 'stretch' }, pickerColumn: { paddingVertical: 76, alignItems: 'center', gap: 6 }, timeOption: { width: 80, height: 43, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, timeOptionText: { fontFamily: 'Inter_700Bold', fontSize: 21 }, colon: { fontFamily: 'Inter_700Bold', fontSize: 23, marginHorizontal: 5 }, cancel: { alignItems: 'center', paddingTop: 18 }, cancelText: { fontFamily: 'Inter_700Bold', fontSize: 14 },

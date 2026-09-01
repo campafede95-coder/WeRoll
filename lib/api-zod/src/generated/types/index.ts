@@ -20,3 +20,4 @@ export * from './participant';
 export * from './registerPushTokenRequest';
 export * from './registerPushTokenRequestPlatform';
 export * from './reminder';
+export * from './testPushResponse';

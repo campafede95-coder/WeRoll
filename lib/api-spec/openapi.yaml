@@ -191,6 +191,20 @@ paths:
       responses:
         "204":
           description: Push token registered
+  /experiences/{experienceId}/test-push:
+    post:
+      operationId: sendTestPush
+      tags: [experiences]
+      summary: Send a test push notification to the current user
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Test notification accepted by Expo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestPushResponse" }
   /experiences/{experienceId}/memories:
     post:
       operationId: createMemory
@@ -329,4 +343,10 @@ components:
       properties:
         token: { type: string, minLength: 10, maxLength: 300 }
         platform: { type: string, enum: [ios, android] }
+    TestPushResponse:
+      type: object
+      required: [sent, attempted]
+      properties:
+        sent: { type: number }
+        attempted: { type: number }
 

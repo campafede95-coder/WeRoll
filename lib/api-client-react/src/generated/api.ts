@@ -29,7 +29,8 @@ import type {
   JoinExperienceRequest,
   Memory,
   RegisterPushTokenRequest,
-  Reminder
+  Reminder,
+  TestPushResponse
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -863,6 +864,77 @@ export const useRegisterPushToken = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRegisterPushTokenMutationOptions(options));
+    }
+
+export const getSendTestPushUrl = (experienceId: string,) => {
+
+
+
+
+  return `/api/experiences/${experienceId}/test-push`
+}
+
+/**
+ * @summary Send a test push notification to the current user
+ */
+export const sendTestPush = async (experienceId: string, options?: Parameters<typeof customFetch>[1]): Promise<TestPushResponse> => {
+
+  return customFetch<TestPushResponse>(getSendTestPushUrl(experienceId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSendTestPushMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestPush>>, TError,{experienceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendTestPush>>, TError,{experienceId: string}, TContext> => {
+
+const mutationKey = ['sendTestPush'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendTestPush>>, {experienceId: string}> = (props) => {
+          const {experienceId} = props ?? {};
+
+          return  sendTestPush(experienceId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendTestPushMutationResult = NonNullable<Awaited<ReturnType<typeof sendTestPush>>>
+
+    export type SendTestPushMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Send a test push notification to the current user
+ */
+export const useSendTestPush = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestPush>>, TError,{experienceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendTestPush>>,
+        TError,
+        {experienceId: string},
+        TContext
+      > => {
+      return useMutation(getSendTestPushMutationOptions(options));
     }
 
 export const getCreateMemoryUrl = (experienceId: string,) => {

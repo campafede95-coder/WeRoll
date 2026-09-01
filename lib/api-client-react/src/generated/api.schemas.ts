@@ -132,3 +132,8 @@ export interface RegisterPushTokenRequest {
   platform: RegisterPushTokenRequestPlatform;
 }
 
+export interface TestPushResponse {
+  sent: number;
+  attempted: number;
+}
+

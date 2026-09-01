@@ -370,6 +370,19 @@ export const RegisterPushTokenResponse = zod.void()
 
 
 /**
+ * @summary Send a test push notification to the current user
+ */
+export const SendTestPushParams = zod.object({
+  "experienceId": zod.coerce.string()
+})
+
+export const SendTestPushResponse = zod.object({
+  "sent": zod.number(),
+  "attempted": zod.number()
+})
+
+
+/**
  * @summary Add a photo memory
  */
 export const CreateMemoryParams = zod.object({

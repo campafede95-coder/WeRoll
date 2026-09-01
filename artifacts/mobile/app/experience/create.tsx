@@ -3,7 +3,7 @@ import { ApiError, ResponseParseError, useCreateExperience } from '@workspace/ap
 import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { AppHeader, PrimaryButton, Surface } from '@/components/AppUI';
@@ -101,6 +101,17 @@ export default function CreateGroupScreen() {
     });
   };
 
+  const shareInvite = async () => {
+    if (!created) return;
+    const message = `Partecipa al mio gruppo WeRoll!\nCodice: ${created.inviteCode}`;
+    try {
+      await Share.share({ message, title: 'Invita al gruppo WeRoll' });
+    } catch (error) {
+      console.warn('Condivisione invito fallita.', error);
+      Alert.alert('Condivisione non disponibile', 'Non è stato possibile aprire il menu di condivisione.');
+    }
+  };
+
   if (step === 4 && created) {
     return (
       <View style={[styles.successPage, { backgroundColor: colors.background }]}>
@@ -109,11 +120,31 @@ export default function CreateGroupScreen() {
           <View style={[styles.successIcon, { backgroundColor: colors.secondary }]}><Feather name="check" size={44} color={colors.primary} /></View>
           <Text style={[styles.successTitle, { color: colors.foreground }]}>Gruppo creato!</Text>
           <Text style={[styles.successBody, { color: colors.mutedForeground }]}>Condividi il codice con i partecipanti. Entreranno senza creare un account.</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Copia il codice" onPress={() => void Clipboard.setStringAsync(created.inviteCode)} style={[styles.codeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          <View style={[styles.codeCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
             <Text style={[styles.code, { color: colors.foreground }]}>{created.inviteCode}</Text>
-            <Feather name="copy" size={23} color={colors.primary} />
-          </Pressable>
-          <Text style={[styles.copyHint, { color: colors.mutedForeground }]}>Tocca per copiare il codice</Text>
+          </View>
+          <View style={styles.inviteActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Copia il codice"
+              testID="copy-invite-code"
+              onPress={() => void Clipboard.setStringAsync(created.inviteCode)}
+              style={({ pressed }) => [styles.inviteAction, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}
+            >
+              <Feather name="copy" size={19} color={colors.primary} />
+              <Text style={[styles.inviteActionLabel, { color: colors.foreground }]}>Copia</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Condividi il codice"
+              testID="share-invite-code"
+              onPress={() => void shareInvite()}
+              style={({ pressed }) => [styles.inviteAction, { borderColor: colors.primary, backgroundColor: colors.primary }, pressed && styles.pressed]}
+            >
+              <Feather name="share-2" size={19} color={colors.primaryForeground} />
+              <Text style={[styles.inviteActionLabel, { color: colors.primaryForeground }]}>Condividi</Text>
+            </Pressable>
+          </View>
           <Surface style={styles.participantCard}><Feather name="users" size={19} color={colors.primary} /><View><Text style={[styles.participantTitle, { color: colors.foreground }]}>Partecipanti collegati (1)</Text><Text style={[styles.participantBody, { color: colors.mutedForeground }]}>Organizzatore · tu</Text></View></Surface>
         </View>
         <PrimaryButton label="Vai alla sessione" icon="arrow-right" onPress={() => router.replace({ pathname: '/experience/[id]', params: { id: created.id, experienceId: created.id } })} style={styles.bottomButton} />
@@ -209,9 +240,11 @@ const styles = StyleSheet.create({
   successIcon: { width: 92, height: 92, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: 27 },
   successTitle: { fontFamily: 'Inter_700Bold', fontSize: 30, letterSpacing: -1 },
   successBody: { fontFamily: 'Inter_400Regular', fontSize: 15, lineHeight: 22, textAlign: 'center', maxWidth: 300, marginTop: 9 },
-  codeCard: { width: '100%', minHeight: 93, borderWidth: 1, borderRadius: 20, paddingHorizontal: 25, marginTop: 29, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  codeCard: { width: '100%', minHeight: 93, borderWidth: 1, borderRadius: 20, paddingHorizontal: 25, marginTop: 29, alignItems: 'center', justifyContent: 'center' },
   code: { fontFamily: 'Inter_700Bold', fontSize: 31, letterSpacing: 7 },
-  copyHint: { fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 10 },
+  inviteActions: { width: '100%', flexDirection: 'row', gap: 10, marginTop: 12 },
+  inviteAction: { flex: 1, minHeight: 52, borderWidth: 1, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  inviteActionLabel: { fontFamily: 'Inter_700Bold', fontSize: 15 },
   participantCard: { width: '100%', marginTop: 28, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 },
   participantTitle: { fontFamily: 'Inter_700Bold', fontSize: 14 },
   participantBody: { fontFamily: 'Inter_400Regular', fontSize: 13, marginTop: 4 },
