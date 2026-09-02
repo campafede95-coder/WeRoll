@@ -169,65 +169,29 @@ export default function GroupSessionScreen() {
   }, [derivedMoment, group, routeMomentIsActive, router]);
 
   useEffect(() => {
-    console.log('[PUSH DEBUG] effect run group.id =', group?.id ?? null, 'platform =', Platform.OS);
-    if (!group || (Platform.OS !== 'ios' && Platform.OS !== 'android')) {
-      console.log('[PUSH DEBUG] effect skipped: missing group or unsupported platform');
-      return;
-    }
+    if (!group || (Platform.OS !== 'ios' && Platform.OS !== 'android')) return;
     let cancelled = false;
 
     const registerThisDevice = async () => {
-      let phase = 'start';
       try {
-        console.log('[PUSH DEBUG] registerThisDevice start');
-        console.log('[PUSH DEBUG] group.id =', group.id);
-        phase = 'ensurePhotoReminderChannel';
-        console.log('[PUSH DEBUG] before ensurePhotoReminderChannel');
         await ensurePhotoReminderChannel();
-        console.log('[PUSH DEBUG] after ensurePhotoReminderChannel');
-
-        phase = 'getPermissionsAsync';
-        console.log('[PUSH DEBUG] before getPermissionsAsync');
         const currentPermission = await Notifications.getPermissionsAsync();
-        console.log('[PUSH DEBUG] after getPermissionsAsync granted =', currentPermission.granted);
-        let permission = currentPermission;
-        if (!currentPermission.granted) {
-          phase = 'requestPermissionsAsync';
-          console.log('[PUSH DEBUG] before requestPermissionsAsync');
-          permission = await Notifications.requestPermissionsAsync();
-          console.log('[PUSH DEBUG] after requestPermissionsAsync granted =', permission.granted);
-        }
-        if (!permission.granted) {
-          console.log('[PUSH DEBUG] registration stopped: notification permission not granted');
-          return;
-        }
+        const permission = currentPermission.granted ? currentPermission : await Notifications.requestPermissionsAsync();
+        if (!permission.granted) return;
 
         const projectId = Constants.easConfig?.projectId ?? Constants.expoConfig?.extra?.eas?.projectId;
-        console.log('[PUSH DEBUG] projectId =', projectId ?? null);
         if (!projectId) {
           console.warn('Le notifiche remote richiedono un Expo/EAS Project ID configurato.');
           return;
         }
 
-        phase = 'getExpoPushTokenAsync';
-        console.log('[PUSH DEBUG] before getExpoPushTokenAsync');
         const token = await Notifications.getExpoPushTokenAsync({ projectId });
-        console.log('[PUSH DEBUG] after getExpoPushTokenAsync');
-        console.log('[PUSH DEBUG] token obtained =', Boolean(token.data));
-        if (cancelled || !token.data) {
-          console.log('[PUSH DEBUG] registration stopped: cancelled =', cancelled, 'token obtained =', Boolean(token.data));
-          return;
-        }
-        console.log('[PUSH DEBUG] before POST push-token');
+        if (cancelled || !token.data) return;
         registerPushToken.mutate({
           experienceId: group.id,
           data: { token: token.data, platform: Platform.OS === 'ios' ? 'ios' : 'android' },
-        }, {
-          onSuccess: () => console.log('[PUSH DEBUG] POST push-token response = success'),
-          onError: (error) => console.warn('[PUSH DEBUG] POST push-token response = error', error),
         });
       } catch (error) {
-        console.warn('[PUSH DEBUG] error during', phase, error);
         console.warn('Non è stato possibile registrare questo telefono per gli avvisi del gruppo.', error);
       }
     };
@@ -276,12 +240,23 @@ export default function GroupSessionScreen() {
         });
       },
       onError: (error) => {
-        const status = typeof error === 'object' && error && 'status' in error ? error.status : undefined;
+        const errorRecord = typeof error === 'object' && error !== null ? error as {
+          status?: unknown;
+          data?: unknown;
+        } : {};
+        const status = typeof errorRecord.status === 'number' ? errorRecord.status : null;
+        const data = typeof errorRecord.data === 'object' && errorRecord.data !== null ? errorRecord.data as {
+          error?: unknown;
+          expo?: unknown;
+        } : {};
+        const backendError = typeof data.error === 'string' ? data.error : null;
+        const expoDetails = data.expo !== undefined ? JSON.stringify(data.expo) : null;
+        const details = [backendError, expoDetails ? `Expo: ${expoDetails}` : null].filter(Boolean).join(' — ');
         setTestPushStatus({
           tone: 'error',
           message: status === 409
             ? 'Nessun token push registrato. Apri questa sessione sul telefono, consenti le notifiche e riprova.'
-            : 'Notifica non inviata. Verifica la connessione e riprova.',
+            : `Errore test push: ${status ? `HTTP ${status}` : 'HTTP sconosciuto'}${details ? ` — ${details}` : ''}`,
         });
       },
     });
