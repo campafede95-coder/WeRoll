@@ -7,8 +7,9 @@ import { getGetExperienceQueryKey, useGetExperience } from '@workspace/api-clien
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as MediaLibrary from 'expo-media-library';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Screen, PrimaryButton } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
@@ -31,6 +32,7 @@ export default function CaptureScreen() {
   const [imageMimeType, setImageMimeType] = useState('image/jpeg');
   const [isSaving, setIsSaving] = useState(false);
   const [permission, requestPermission] = ImagePicker.useCameraPermissions();
+  const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions({ writeOnly: true });
   const [openingCamera, setOpeningCamera] = useState(autoCamera === 'true');
   const autoCameraOpened = useRef(false);
   useEffect(() => {
@@ -40,6 +42,21 @@ export default function CaptureScreen() {
     }
     void AsyncStorage.getItem(LAST_EXPERIENCE_ID_STORAGE_KEY).then((value) => setStoredExperienceId(resolveExperienceId(value)));
   }, [experienceId]);
+  const saveCameraPhotoToLibrary = async (uri: string) => {
+    if (Platform.OS === 'web') return;
+    try {
+      const currentPermission = mediaLibraryPermission?.granted
+        ? mediaLibraryPermission
+        : await requestMediaLibraryPermission();
+      if (!currentPermission.granted) {
+        console.warn('Salvataggio nella galleria saltato: permesso non concesso.');
+        return;
+      }
+      await MediaLibrary.saveToLibraryAsync(uri);
+    } catch (error) {
+      console.warn('Salvataggio nella galleria fallito; l’upload continua.', error);
+    }
+  };
   const capture = async (automatic = false) => {
     if (automatic) setOpeningCamera(true);
     try {
@@ -59,6 +76,7 @@ export default function CaptureScreen() {
         const asset = result.assets[0];
         setImageUri(asset.uri);
         setImageMimeType(asset.mimeType || 'image/jpeg');
+        void saveCameraPhotoToLibrary(asset.uri);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } finally {
