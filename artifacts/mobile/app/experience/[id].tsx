@@ -15,6 +15,7 @@ import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList,
 import { useColors } from '@/hooks/useColors';
 import { LAST_EXPERIENCE_ID_STORAGE_KEY, rememberClosedExperience, resolveExperienceId } from '@/constants/experience';
 import { clearExperienceNotifications, ensurePhotoReminderChannel } from '@/constants/notifications';
+import { waitForPendingUploads } from '@/constants/pendingUploads';
 import { pickerOffsetForIndex } from '@/constants/timePicker';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
@@ -121,6 +122,7 @@ export default function GroupSessionScreen() {
   const [editing, setEditing] = useState<EditingReminder>(null);
   const [testPushStatus, setTestPushStatus] = useState<TestPushStatus>(null);
   const [isExportingAlbum, setIsExportingAlbum] = useState(false);
+  const [isClosingSession, setIsClosingSession] = useState(false);
   const [now, setNow] = useState(Date.now());
   const group = query.data;
   const derivedMoment = useMemo(() => {
@@ -263,8 +265,10 @@ export default function GroupSessionScreen() {
   };
   const startSession = () => { if (experienceId) start.mutate({ experienceId }, { onSuccess: refresh }); };
   const closeSession = () => {
-    if (!experienceId) return;
+    if (!experienceId || isClosingSession || close.isPending) return;
     const closeAfterLocalCancellation = async () => {
+      setIsClosingSession(true);
+      await waitForPendingUploads(experienceId);
       try {
         await rememberClosedExperience(experienceId);
       } catch (error) {
@@ -279,6 +283,9 @@ export default function GroupSessionScreen() {
       close.mutate({ experienceId }, {
         onSuccess: () => {
           refresh();
+        },
+        onSettled: () => {
+          setIsClosingSession(false);
         },
       });
     };
@@ -431,7 +438,7 @@ export default function GroupSessionScreen() {
             style={{ marginTop: 24 }}
           />
           <Surface style={styles.albumPreview}><Feather name="image" size={21} color={colors.primary} /><View style={{ flex: 1 }}><Text style={[styles.personName, { color: colors.foreground }]}>Album condiviso</Text><Text style={[styles.personRole, { color: colors.mutedForeground }]}>{group.memories.length} ricordi raccolti finora</Text></View></Surface>
-          {group.isOwner ? <Pressable accessibilityRole="button" accessibilityLabel="Chiudi sessione" onPress={closeSession} style={styles.closeSession}><Text style={[styles.closeText, { color: colors.destructive }]}>Chiudi sessione</Text></Pressable> : null}
+          {group.isOwner ? <Pressable accessibilityRole="button" accessibilityLabel="Chiudi sessione" disabled={isClosingSession || close.isPending} onPress={closeSession} style={[styles.closeSession, (isClosingSession || close.isPending) && { opacity: 0.48 }]}><Text style={[styles.closeText, { color: colors.destructive }]}>{isClosingSession ? 'Caricamento ultime foto…' : 'Chiudi sessione'}</Text></Pressable> : null}
         </>
       )}
 

@@ -14,6 +14,7 @@ import { Image } from 'expo-image';
 import { Screen, PrimaryButton } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
+import { trackPendingUpload } from '@/constants/pendingUploads';
 
 const SAVE_TIMEOUT_MS = 45_000;
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
@@ -109,7 +110,6 @@ export default function CaptureScreen() {
       Alert.alert('Gruppo non disponibile', 'Riapri la sessione e prova di nuovo. La foto resta qui e non viene persa.');
       return;
     }
-    saveControllerRef.current?.abort();
     router.dismissTo({ pathname: '/experience/[id]', params: { id: experienceId } });
   };
   const save = async () => {
@@ -125,7 +125,7 @@ export default function CaptureScreen() {
     const controller = new AbortController();
     saveControllerRef.current = controller;
     const timeout = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
-    try {
+    const upload = trackPendingUpload(experienceId, (async () => {
       const headers: Record<string, string> = {
         'Content-Type': imageMimeType,
         'x-captured-at': new Date().toISOString(),
@@ -152,6 +152,9 @@ export default function CaptureScreen() {
         error.status = response.status;
         throw error;
       }
+    })());
+    try {
+      await upload;
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       void queryClient.invalidateQueries({ queryKey: getGetExperienceQueryKey(experienceId) });
       router.dismissTo({ pathname: '/experience/[id]', params: { id: experienceId } });
