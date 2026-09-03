@@ -1,8 +1,9 @@
-import { Router, type Request, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, experiencesTable, memoriesTable, participantsTable, pushTokensTable, reminderDeliveriesTable, remindersTable, usersTable } from "@workspace/db";
 import { z } from "zod";
 import { logger } from "../lib/logger";
+import { createFirebaseImageUrl, deleteFirebaseObject, uploadFirebaseImage } from "../lib/firebaseStorage";
 
 const router = Router();
 const id = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -16,6 +17,22 @@ const EXPO_RECEIPT_MIN_AGE_MS = 15_000;
 const DELIVERY_LEASE_MS = 60_000;
 const EXPO_REQUEST_TIMEOUT_MS = 20_000;
 const INVALID_EXPO_TOKEN_ERRORS = new Set(["DeviceNotRegistered"]);
+const MEMORY_IMAGE_LIMIT = "25mb";
+const MEMORY_IMAGE_TYPES = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/jpg", "jpg"],
+  ["image/pjpeg", "jpg"],
+  ["image/x-jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/x-png", "png"],
+  ["image/webp", "webp"],
+  ["image/x-webp", "webp"],
+  ["image/heic", "heic"],
+  ["image/heic-sequence", "heic"],
+  ["image/heif", "heif"],
+  ["image/heif-sequence", "heif"],
+  ["application/octet-stream", "jpg"],
+]);
 
 function messageVariantForReminder(reminderId: string) {
   let hash = 2166136261;
@@ -40,12 +57,27 @@ async function sendExpoPushBatch(messages: Array<Record<string, unknown>>) {
     body: JSON.stringify(messages),
     signal: AbortSignal.timeout(EXPO_REQUEST_TIMEOUT_MS),
   });
-  if (!response.ok) throw new Error(`Expo push service returned ${response.status}`);
+  logger.info({ httpStatus: response.status }, "Expo push service response received");
+  if (!response.ok) {
+    logger.error({
+      httpStatus: response.status,
+      httpStatusText: response.statusText,
+    }, "Expo push service returned an HTTP error");
+    throw new Error(`Expo push service returned ${response.status}`);
+  }
 
   const payload = await response.json() as { data?: ExpoPushTicket[] };
   if (!Array.isArray(payload.data) || payload.data.length !== messages.length) {
     throw new Error("Expo push service returned an invalid ticket response");
   }
+  logger.info({
+    ticketCount: payload.data.length,
+    tickets: payload.data.map((ticket) => ({
+      status: ticket.status ?? null,
+      message: ticket.message ?? null,
+      error: ticket.details?.error ?? null,
+    })),
+  }, "Expo push service tickets received");
   return payload.data;
 }
 
@@ -547,7 +579,7 @@ router.get("/:experienceId", async (req, res) => {
       .where(eq(memoriesTable.experienceId, experience[0].id)).orderBy(desc(memoriesTable.capturedAt)),
   ]);
   return res.json({ ...base, participants: participants.map(({ organizerId, ...participant }) => ({ ...participant, isOrganizer: organizerId === experience[0].ownerId })), reminders, memories: memoryRows.map(({ memory, authorName, reminderTitle }) => ({
-    id: memory.id, imageUri: memory.imageUri, authorName, capturedAt: memory.capturedAt, reminderTitle: reminderTitle ?? null,
+    id: memory.id, imageUri: createFirebaseImageUrl(memory.imageUri), authorName, capturedAt: memory.capturedAt, reminderTitle: reminderTitle ?? null,
   })) });
 });
 
@@ -634,10 +666,20 @@ router.post("/:experienceId/test-push", async (req, res) => {
   }
 
   const sent = tickets.filter((ticket) => ticket.status === "ok").length;
+  const expoErrors = tickets
+    .filter((ticket) => ticket.status !== "ok")
+    .map((ticket) => ({
+      status: ticket.status ?? "unknown",
+      message: ticket.message ?? null,
+      details: { error: ticket.details?.error ?? null },
+    }));
   if (!sent) {
-    return res.status(502).json({ error: "Expo ha rifiutato la notifica di prova. Verifica i permessi e riprova." });
+    return res.status(502).json({
+      error: "Expo ha rifiutato la notifica di prova. Verifica i permessi e riprova.",
+      expo: expoErrors,
+    });
   }
-  return res.json({ sent, attempted: tokens.length });
+  return res.json({ sent, attempted: tokens.length, ...(expoErrors.length ? { expo: expoErrors } : {}) });
 });
 
 router.post("/:experienceId/close", async (req, res) => {
@@ -685,15 +727,61 @@ router.patch("/:experienceId/reminders/:reminderId", async (req, res) => {
   return res.json(updated[0]);
 });
 
-router.post("/:experienceId/memories", async (req, res) => {
+router.post(
+  "/:experienceId/memories",
+  express.raw({ type: ["application/octet-stream", "image/*"], limit: MEMORY_IMAGE_LIMIT }),
+  async (req, res) => {
   const userId = guest(req, res);
   if (!userId) return;
   if (!await canAccess(req.params.experienceId, userId)) return res.status(403).json({ error: "Forbidden" });
-  const body = z.object({ imageUri: z.string().min(1), capturedAt: z.coerce.date(), reminderId: z.string().nullish() }).parse(req.body);
-  const memory = { id: id(), experienceId: req.params.experienceId, authorId: userId, ...body, reminderId: body.reminderId ?? null };
-  await db.insert(memoriesTable).values(memory);
+  const contentType = req.header("content-type")?.split(";", 1)[0].trim().toLowerCase() ?? "";
+  const extension = MEMORY_IMAGE_TYPES.get(contentType);
+  if (!extension) return res.status(415).json({ error: "Unsupported image type" });
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ error: "Missing image data" });
+  }
+  const metadata = z.object({
+    capturedAt: z.coerce.date(),
+    reminderId: z.string().trim().min(1).nullable(),
+  }).parse({
+    capturedAt: req.header("x-captured-at"),
+    reminderId: req.header("x-reminder-id")?.trim() || null,
+  });
+  const memoryId = id();
+  const objectPath = `experiences/${req.params.experienceId}/memories/${memoryId}.${extension}`;
+  let imageUri: string;
+  try {
+    imageUri = await uploadFirebaseImage({ objectPath, data: req.body, contentType });
+  } catch (error) {
+    logger.error({ err: error, experienceId: req.params.experienceId, memoryId }, "Unable to upload memory image");
+    return res.status(502).json({ error: "Unable to store photo" });
+  }
+  const memory = {
+    id: memoryId,
+    experienceId: req.params.experienceId,
+    authorId: userId,
+    imageUri,
+    capturedAt: metadata.capturedAt,
+    reminderId: metadata.reminderId,
+  };
+  try {
+    await db.insert(memoriesTable).values(memory);
+  } catch (error) {
+    try {
+      await deleteFirebaseObject(imageUri);
+    } catch (cleanupError) {
+      logger.error({ err: cleanupError, experienceId: req.params.experienceId, memoryId }, "Unable to clean up orphaned memory image");
+    }
+    throw error;
+  }
   const author = await db.select({ displayName: usersTable.displayName }).from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-  return res.status(201).json({ id: memory.id, imageUri: memory.imageUri, authorName: author[0]?.displayName ?? "Partecipante", capturedAt: memory.capturedAt, reminderTitle: null });
+  return res.status(201).json({
+    id: memory.id,
+    imageUri: createFirebaseImageUrl(memory.imageUri),
+    authorName: author[0]?.displayName ?? "Partecipante",
+    capturedAt: memory.capturedAt,
+    reminderTitle: null,
+  });
 });
 
 export default router;

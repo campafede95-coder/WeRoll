@@ -16,3 +16,28 @@ export async function ensurePhotoReminderChannel() {
     vibrationPattern: [0, 250, 140, 250],
   });
 }
+
+function belongsToExperience(data: Record<string, unknown> | undefined, experienceId: string) {
+  return data?.experienceId === experienceId;
+}
+
+export async function clearExperienceNotifications(experienceId: string) {
+  if (Platform.OS === 'web') return;
+
+  const [scheduled, presented, lastResponse] = await Promise.all([
+    Notifications.getAllScheduledNotificationsAsync().catch(() => []),
+    Notifications.getPresentedNotificationsAsync().catch(() => []),
+    Notifications.getLastNotificationResponseAsync().catch(() => null),
+  ]);
+  const cancellations = scheduled
+    .filter((notification) => belongsToExperience(notification.content.data, experienceId))
+    .map((notification) => Notifications.cancelScheduledNotificationAsync(notification.identifier));
+  const dismissals = presented
+    .filter((notification) => belongsToExperience(notification.request.content.data, experienceId))
+    .map((notification) => Notifications.dismissNotificationAsync(notification.request.identifier));
+
+  await Promise.allSettled([...cancellations, ...dismissals]);
+  if (lastResponse && belongsToExperience(lastResponse.notification.request.content.data, experienceId)) {
+    await Notifications.clearLastNotificationResponseAsync();
+  }
+}

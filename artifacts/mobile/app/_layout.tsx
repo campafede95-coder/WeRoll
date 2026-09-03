@@ -20,7 +20,7 @@ import { setBaseUrl, setGuestIdentityGetter } from '@workspace/api-client-react'
 import { useColors } from '@/hooks/useColors';
 import { ensurePhotoReminderChannel } from '@/constants/notifications';
 import type { PhotoPromptVariant } from '@/constants/photoPrompts';
-import { CLOSED_EXPERIENCES_STORAGE_KEY, rememberClosedExperience } from '@/constants/experience';
+import { isExperienceLocallyClosed, loadClosedExperiences, rememberClosedExperience } from '@/constants/experience';
 import { clearActiveReminder, loadActiveReminder, saveActiveReminder, type ActiveReminder } from '@/constants/activeReminder';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -49,9 +49,11 @@ setBaseUrl(apiBaseUrl);
 const queryClient = new QueryClient();
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 const TEST_PHOTO_WINDOW_MS = 30 * 1000;
+const closedExperiencesReady = loadClosedExperiences();
 
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
+    await closedExperiencesReady;
     const data = notification.request.content.data;
     const experienceId = typeof data?.experienceId === 'string' ? data.experienceId : '';
     const isTest = data?.test === true || data?.test === 'true';
@@ -69,17 +71,6 @@ function notificationMomentKey(notification: Notifications.Notification) {
   const data = notification.request.content.data;
   if (typeof data?.experienceId !== 'string' || typeof data?.scheduledAt !== 'string') return notification.request.identifier;
   return `${data.experienceId}:${typeof data.reminderId === 'string' ? data.reminderId : data.scheduledAt}`;
-}
-
-async function isExperienceLocallyClosed(experienceId: string) {
-  const stored = await AsyncStorage.getItem(CLOSED_EXPERIENCES_STORAGE_KEY);
-  if (!stored) return false;
-  try {
-    const closedExperiences = JSON.parse(stored) as unknown;
-    return Array.isArray(closedExperiences) && closedExperiences.includes(experienceId);
-  } catch {
-    return false;
-  }
 }
 
 async function isExperienceClosedRemotely(experienceId: string) {
@@ -238,7 +229,18 @@ export default function RootLayout() {
       }
       await clearActiveReminder();
       const presented = await Notifications.getPresentedNotificationsAsync();
-      const activeNotification = presented
+      const eligibleNotifications: Notifications.Notification[] = [];
+      for (const notification of presented) {
+        const data = notification.request.content.data;
+        const experienceId = typeof data?.experienceId === 'string' ? data.experienceId : '';
+        const isTest = data?.test === true || data?.test === 'true';
+        if (!isTest && experienceId && await isExperienceClosedRemotely(experienceId)) {
+          await Notifications.dismissNotificationAsync(notification.request.identifier);
+          continue;
+        }
+        eligibleNotifications.push(notification);
+      }
+      const activeNotification = eligibleNotifications
         .filter((notification) => {
           const data = notification.request.content.data;
           const start = typeof data?.scheduledAt === 'string' ? new Date(data.scheduledAt).getTime() : NaN;

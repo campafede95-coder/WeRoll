@@ -14,7 +14,7 @@ import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View }
 import { AppHeader, EmptyState, ErrorState, PrimaryButton, Screen, SkeletonList, Surface } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
 import { LAST_EXPERIENCE_ID_STORAGE_KEY, rememberClosedExperience, resolveExperienceId } from '@/constants/experience';
-import { ensurePhotoReminderChannel } from '@/constants/notifications';
+import { clearExperienceNotifications, ensurePhotoReminderChannel } from '@/constants/notifications';
 import { pickerOffsetForIndex } from '@/constants/timePicker';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
@@ -265,17 +265,19 @@ export default function GroupSessionScreen() {
   const closeSession = () => {
     if (!experienceId) return;
     const closeAfterLocalCancellation = async () => {
-      if (Platform.OS === 'ios' || Platform.OS === 'android') try {
-        const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-        const sessionNotifications = scheduled.filter((notification) => notification.content.data?.experienceId === experienceId);
-        await Promise.allSettled(sessionNotifications.map((notification) => Notifications.cancelScheduledNotificationAsync(notification.identifier)));
+      try {
+        await rememberClosedExperience(experienceId);
       } catch (error) {
-        console.warn('Non è stato possibile rimuovere tutte le sveglie locali della sessione.', error);
+        console.warn('Non è stato possibile salvare localmente la chiusura della sessione.', error);
+      }
+      try {
+        await clearExperienceNotifications(experienceId);
+      } catch (error) {
+        console.warn('Non è stato possibile rimuovere tutte le notifiche locali della sessione.', error);
       }
       await AsyncStorage.removeItem('pic-sync-active-moment');
       close.mutate({ experienceId }, {
         onSuccess: () => {
-          void rememberClosedExperience(experienceId);
           refresh();
         },
       });
