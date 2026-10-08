@@ -1,0 +1,17 @@
+{
+  "build": {
+    "android-apk": {
+      "distribution": "internal",
+      "environment": "production",
+      "android": {
+        "buildType": "apk"
+      },
+      "channel": "android-apk"
+    },
+    "ios-development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "ios-development"
+    }
+  }
+}

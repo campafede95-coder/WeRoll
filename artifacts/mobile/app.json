@@ -1,0 +1,82 @@
+{
+  "expo": {
+    "name": "WeRoll",
+    "slug": "weroll",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "weroll",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f8f3ea"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.weroll.app"
+    },
+    "android": {
+      "package": "com.weroll.app",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
+      "expo-font",
+      "expo-dev-client",
+      "expo-web-browser",
+      "./plugins/withAndroidPackagingExclusion",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "pic-sync-reminders-v3",
+          "sounds": [
+            "./assets/sounds/photo_reminder.mp3"
+          ]
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pic Sync Collective accede alle tue foto per aggiungerle alle esperienze condivise.",
+          "cameraPermission": "Pic Sync Collective usa la fotocamera per fermare i vostri momenti."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "WeRoll accede alle tue foto per salvare e condividere i ricordi.",
+          "savePhotosPermission": "WeRoll salva nella galleria una copia originale delle foto scattate."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "cafdfc07-0d4a-4cfc-89af-5dea647808d5"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+   "updates": {
+      "url": "https://u.expo.dev/cafdfc07-0d4a-4cfc-89af-5dea647808d5"
+    }
+  }
+}

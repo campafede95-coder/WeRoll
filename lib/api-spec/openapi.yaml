@@ -1,0 +1,358 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: experiences
+    description: Shared experiences and memories
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /experiences:
+    get:
+      operationId: listExperiences
+      tags: [experiences]
+      summary: List the signed-in user's experiences
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Experiences
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Experience" }
+    post:
+      operationId: createExperience
+      tags: [experiences]
+      summary: Create an experience
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExperienceRequest" }
+      responses:
+        "201":
+          description: Created experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experience" }
+  /experiences/join:
+    post:
+      operationId: joinExperience
+      tags: [experiences]
+      summary: Join an experience using an invite code
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JoinExperienceRequest" }
+      responses:
+        "200":
+          description: Joined experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experience" }
+  /experiences/{experienceId}:
+    get:
+      operationId: getExperience
+      tags: [experiences]
+      summary: Get an experience with reminders and memories
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Experience details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExperienceDetail" }
+    patch:
+      operationId: updateExperience
+      tags: [experiences]
+      summary: Update an owned experience
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExperienceRequest" }
+      responses:
+        "200":
+          description: Updated experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Experience" }
+  /experiences/{experienceId}/reminders:
+    post:
+      operationId: createReminder
+      tags: [experiences]
+      summary: Schedule a photo reminder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReminderRequest" }
+      responses:
+        "201":
+          description: Created reminder
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reminder" }
+  /experiences/{experienceId}/reminders/{reminderId}:
+    patch:
+      operationId: updateReminder
+      tags: [experiences]
+      summary: Update a scheduled reminder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+        - name: reminderId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReminderRequest" }
+      responses:
+        "200":
+          description: Updated reminder
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reminder" }
+  /experiences/{experienceId}/start:
+    post:
+      operationId: startExperience
+      tags: [experiences]
+      summary: Start the reminder session
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Started experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExperienceDetail" }
+  /experiences/{experienceId}/close:
+    post:
+      operationId: closeExperience
+      tags: [experiences]
+      summary: Close the reminder session
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Closed experience
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExperienceDetail" }
+  /experiences/{experienceId}/push-token:
+    post:
+      operationId: registerPushToken
+      tags: [experiences]
+      summary: Register this device for group photo reminders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterPushTokenRequest" }
+      responses:
+        "204":
+          description: Push token registered
+  /experiences/{experienceId}/test-push:
+    post:
+      operationId: sendTestPush
+      tags: [experiences]
+      summary: Send a test push notification to the group
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      responses:
+        "200":
+          description: Test notification delivery result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestPushResult" }
+  /experiences/{experienceId}/memories:
+    post:
+      operationId: createMemory
+      tags: [experiences]
+      summary: Add a photo memory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ExperienceId"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Created memory
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ExperienceId:
+      name: experienceId
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    Experience:
+      type: object
+      required: [id, name, startDate, endDate, status, participantCount, inviteCode, targetPhotoCount, sessionStatus, windowStart, windowEnd, timeZone, isOwner]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        coverImageUri: { type: string, nullable: true }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        status: { type: string, enum: [upcoming, ongoing, completed] }
+        participantCount: { type: number }
+        inviteCode: { type: string }
+        targetPhotoCount: { type: number }
+        sessionStatus: { type: string, enum: [lobby, active, closed] }
+        windowStart: { type: string, nullable: true }
+        windowEnd: { type: string, nullable: true }
+        timeZone: { type: string }
+        isOwner: { type: boolean }
+    ExperienceDetail:
+      allOf:
+        - $ref: "#/components/schemas/Experience"
+        - type: object
+          required: [participants, reminders, memories]
+          properties:
+            participants:
+              type: array
+              items: { $ref: "#/components/schemas/Participant" }
+            reminders:
+              type: array
+              items: { $ref: "#/components/schemas/Reminder" }
+            memories:
+              type: array
+              items: { $ref: "#/components/schemas/Memory" }
+    Participant:
+      type: object
+      required: [id, displayName, isOrganizer]
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        avatarUrl: { type: string, nullable: true }
+        isOrganizer: { type: boolean }
+    Reminder:
+      type: object
+      required: [id, title, scheduledAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        message: { type: string, nullable: true }
+        scheduledAt: { type: string, format: date-time }
+    Memory:
+      type: object
+      required: [id, imageUri, authorName, capturedAt]
+      properties:
+        id: { type: string }
+        imageUri: { type: string }
+        authorName: { type: string }
+        capturedAt: { type: string, format: date-time }
+        reminderTitle: { type: string, nullable: true }
+    CreateExperienceRequest:
+      type: object
+      required: [name, startDate, endDate]
+      properties:
+        name: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        coverImageUri: { type: string, nullable: true }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        targetPhotoCount: { type: number, minimum: 1, maximum: 100 }
+        windowStart: { type: string, nullable: true }
+        windowEnd: { type: string, nullable: true }
+        timeZone: { type: string, nullable: true }
+    JoinExperienceRequest:
+      type: object
+      required: [inviteCode, displayName]
+      properties:
+        inviteCode: { type: string, minLength: 4 }
+        displayName: { type: string, minLength: 1, maxLength: 40 }
+    CreateReminderRequest:
+      type: object
+      required: [title, scheduledAt]
+      properties:
+        title: { type: string, minLength: 1 }
+        message: { type: string, nullable: true }
+        scheduledAt: { type: string, format: date-time }
+    RegisterPushTokenRequest:
+      type: object
+      required: [token, platform]
+      properties:
+        token: { type: string, minLength: 10, maxLength: 300 }
+        platform: { type: string, enum: [ios, android] }
+    TestPushResult:
+      type: object
+      required: [sent, attempted]
+      properties:
+        sent: { type: number, minimum: 0 }
+        attempted: { type: number, minimum: 0 }
+        expo:
+          type: array
+          items:
+            type: object
+            required: [status, message, details]
+            properties:
+              status: { type: string }
+              message: { type: string, nullable: true }
+              details:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string, nullable: true }
+

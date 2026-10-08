@@ -1,0 +1,214 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getGetExperienceQueryKey, useGetExperience } from '@workspace/api-client-react';
+import { Feather } from '@expo/vector-icons';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { Alert, BackHandler, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useColors } from '@/hooks/useColors';
+import { LAST_EXPERIENCE_ID_STORAGE_KEY, resolveExperienceId } from '@/constants/experience';
+import { authorizeExperienceReturn, isExperienceReturnAuthorized } from '@/constants/experienceNavigation';
+import { getPhotoPromptForReminder, type PhotoPromptVariant } from '@/constants/photoPrompts';
+import { clearActiveReminder } from '@/constants/activeReminder';
+
+const PHOTO_WINDOW_MS = 15 * 60 * 1000;
+const TEST_PHOTO_WINDOW_MS = 30 * 1000;
+function formatCountdown(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+export default function PhotoMomentScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const navigation = useNavigation();
+  const returnInProgress = useRef(false);
+  const { id, experienceId: experienceIdParam, reminderId, scheduledAt, test, notificationId, messageVariant } = useLocalSearchParams<{ id: string; experienceId?: string; reminderId?: string; scheduledAt?: string; test?: string; notificationId?: string; messageVariant?: string }>();
+  const isTest = test === 'true';
+  const experienceId = resolveExperienceId(experienceIdParam, id);
+  const experience = useGetExperience(experienceId, {
+    query: {
+      queryKey: getGetExperienceQueryKey(experienceId),
+      enabled: Boolean(experienceId) && !isTest,
+      refetchInterval: 5000,
+    },
+  }).data;
+  const sessionClosed = !isTest && experience?.sessionStatus === 'closed';
+  const captureExperienceId = experience?.id ?? experienceId;
+  const reminder = useMemo(() => experience?.reminders.find((item) => item.id === reminderId), [experience?.reminders, reminderId]);
+  const reminderProgress = useMemo(() => {
+    if (isTest || !experience?.reminders.length) return null;
+    const reminders = [...experience.reminders].sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+    const currentIndex = reminders.findIndex((item) => item.id === reminderId || (!reminderId && item.scheduledAt === scheduledAt));
+    return currentIndex >= 0 ? { current: currentIndex + 1, total: reminders.length } : null;
+  }, [experience?.reminders, isTest, reminderId, scheduledAt]);
+  const promptVariant: PhotoPromptVariant | undefined = messageVariant === 'special' || messageVariant === 'normal' ? messageVariant : undefined;
+  const reminderKey = !isTest && reminderId ? reminderId : '';
+  const [photoPrompt] = useState(() => getPhotoPromptForReminder(reminderKey, promptVariant));
+  const startTime = useMemo(() => {
+    const value = scheduledAt || reminder?.scheduledAt;
+    const parsed = value ? new Date(value).getTime() : Date.now();
+    return Number.isFinite(parsed) ? parsed : Date.now();
+  }, [reminder?.scheduledAt, scheduledAt]);
+  const endTime = startTime + (isTest ? TEST_PHOTO_WINDOW_MS : PHOTO_WINDOW_MS);
+  const [now, setNow] = useState(Date.now());
+  const remaining = sessionClosed ? 0 : Math.max(0, endTime - now);
+  const expired = remaining <= 0;
+
+  const closeMoment = useCallback(async () => {
+    if (!experienceId || returnInProgress.current) return;
+    returnInProgress.current = true;
+    try {
+      await clearActiveReminder();
+      if (notificationId && Platform.OS !== 'web') {
+        try {
+          await Notifications.dismissNotificationAsync(notificationId);
+        } catch {
+          // The notification may already be dismissed by the operating system.
+        }
+      }
+    } finally {
+      authorizeExperienceReturn(experienceId);
+      router.dismissTo({
+        pathname: '/experience/[id]',
+        params: {
+          id: experienceId,
+          experienceId,
+          ...(isTest || !reminderId || !scheduledAt ? {} : { momentReminderId: reminderId, momentScheduledAt: scheduledAt }),
+        },
+      });
+      setTimeout(() => {
+        returnInProgress.current = false;
+      }, 1000);
+    }
+  }, [experienceId, isTest, notificationId, reminderId, router, scheduledAt]);
+
+  useEffect(() => {
+    if (!sessionClosed || !experienceId) return;
+    void closeMoment();
+  }, [closeMoment, experienceId, sessionClosed]);
+
+  useEffect(() => navigation.addListener('beforeRemove', (event) => {
+    if (!experienceId || isExperienceReturnAuthorized(experienceId)) return;
+    event.preventDefault();
+    void closeMoment();
+  }), [closeMoment, experienceId, navigation]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      void closeMoment();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closeMoment]);
+
+  useEffect(() => {
+    if (expired) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [expired]);
+
+  const openCapture = async () => {
+    const savedExperienceId = captureExperienceId || resolveExperienceId(await AsyncStorage.getItem(LAST_EXPERIENCE_ID_STORAGE_KEY));
+    if (!savedExperienceId) {
+      console.warn('Il countdown non ha ricevuto un ID gruppo valido.', { id, experienceIdParam });
+      Alert.alert('Countdown non disponibile', 'Torna alla sessione attiva e riapri il countdown.');
+      return;
+    }
+    router.push({
+      pathname: '/capture/[id]',
+      params: {
+        id: savedExperienceId,
+        experienceId: savedExperienceId,
+        autoCamera: 'true',
+        ...(isTest ? { test: 'true' } : {}),
+        ...(reminderId ? { reminderId } : {}),
+        ...(scheduledAt ? { scheduledAt } : {}),
+      },
+    });
+  };
+
+  return (
+    <View style={[styles.page, { backgroundColor: colors.background, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
+      <View style={styles.topBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Chiudi countdown"
+          testID="photo-window-close"
+          onPress={() => void closeMoment()}
+          style={({ pressed }) => [styles.closeButton, { backgroundColor: colors.card }, pressed && styles.pressed]}
+        >
+          <Feather name="x" size={22} color={colors.foreground} />
+        </Pressable>
+      </View>
+      <View style={styles.content}>
+        <View style={[styles.iconCircle, { backgroundColor: colors.secondary }]}>
+          <Feather name={expired ? 'clock' : 'camera'} size={67} color={colors.primary} />
+        </View>
+        {isTest ? <View style={[styles.testPill, { backgroundColor: colors.accent }]}><Feather name="radio" size={13} color={colors.accentForeground} /><Text style={[styles.testPillText, { color: colors.accentForeground }]}>PROVA AVVISO · SOLO TU</Text></View> : null}
+         <Text style={[styles.title, { color: colors.foreground }]}>{expired ? 'Tempo scaduto' : isTest ? 'Countdown di prova' : 'È ora del vostro ricordo!'}</Text>
+         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{expired ? 'La finestra per questo ricordo è terminata' : isTest ? 'Controlla suono e vibrazione · questa foto non sarà salvata' : 'Momento attivo per:'}</Text>
+        {photoPrompt ? (
+          <View style={[styles.promptCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Feather name="zap" size={16} color={colors.primary} />
+            <Text style={[styles.promptText, { color: colors.foreground }]}>{photoPrompt}</Text>
+          </View>
+        ) : null}
+        <Text accessibilityLabel={`${formatCountdown(remaining)} rimanenti`} testID="photo-window-countdown" style={[styles.countdown, { color: expired ? colors.mutedForeground : colors.primary }]}>{formatCountdown(remaining)}</Text>
+         {!isTest && reminderProgress ? <Text style={[styles.reminderTitle, { color: colors.mutedForeground }]}>Ricordo n. {reminderProgress.current} di {reminderProgress.total}</Text> : null}
+      </View>
+
+      <View style={styles.actions}>
+        <Pressable
+          accessibilityRole="button"
+           accessibilityLabel={isTest ? 'Scatta foto di prova senza salvare' : 'Cattura il momento'}
+          testID="photo-window-capture"
+          disabled={expired}
+          onPress={() => void openCapture()}
+          style={({ pressed }) => [styles.primaryAction, { backgroundColor: expired ? colors.muted : colors.primary }, pressed && !expired && styles.pressed]}
+        >
+          <Feather name="camera" size={23} color={expired ? colors.mutedForeground : colors.primaryForeground} />
+           <Text style={[styles.primaryLabel, { color: expired ? colors.mutedForeground : colors.primaryForeground }]}>{isTest ? 'Scatta prova' : 'Cattura il momento'}</Text>
+        </Pressable>
+        {isTest || expired ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isTest ? 'Chiudi prova' : 'Torna alla sessione'}
+            testID="photo-window-dismiss"
+            onPress={() => void closeMoment()}
+            style={({ pressed }) => [styles.returnAction, { borderColor: colors.border, backgroundColor: colors.card }, pressed && styles.pressed]}
+          >
+            <Text style={[styles.returnLabel, { color: colors.foreground }]}>{isTest ? 'Chiudi prova' : 'Torna alla sessione'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  page: { flex: 1, paddingHorizontal: 22 },
+  topBar: { alignItems: 'flex-end' },
+  closeButton: { width: 43, height: 43, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 28 },
+  iconCircle: { width: 176, height: 176, borderRadius: 88, alignItems: 'center', justifyContent: 'center' },
+  title: { fontFamily: 'Inter_700Bold', fontSize: 36, lineHeight: 42, letterSpacing: -1.1, textAlign: 'center', marginTop: 42 },
+  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 19, lineHeight: 26, textAlign: 'center', marginTop: 20 },
+  promptCard: { width: '100%', maxWidth: 360, borderWidth: 1, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 13, marginTop: 20 },
+  promptText: { flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14, lineHeight: 20 },
+  countdown: { fontFamily: 'Inter_700Bold', fontSize: 60, lineHeight: 68, letterSpacing: -2.4, marginTop: 23, fontVariant: ['tabular-nums'] },
+  reminderTitle: { fontFamily: 'Inter_500Medium', fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 12 },
+  testPill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 99, paddingHorizontal: 12, paddingVertical: 7 },
+  testPillText: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 1 },
+  actions: { gap: 12 },
+  primaryAction: { minHeight: 66, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  primaryLabel: { fontFamily: 'Inter_700Bold', fontSize: 17 },
+  returnAction: { minHeight: 52, borderWidth: 1, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  returnLabel: { fontFamily: 'Inter_700Bold', fontSize: 15 },
+  pressed: { opacity: 0.82, transform: [{ scale: 0.985 }] },
+});
