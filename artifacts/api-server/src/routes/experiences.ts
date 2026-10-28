@@ -2,6 +2,8 @@ import express, { Router, type Request, type Response } from "express";
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, experiencesTable, memoriesTable, participantsTable, pushTokensTable, reminderDeliveriesTable, remindersTable, usersTable } from "@workspace/db";
 import { z } from "zod";
+import { isWebPushToken, webPushToken } from "../lib/devicePush";
+import { webRecipients, reminderPayload, stillEligible, sendWebReminder, removeWebRecipient } from "../lib/webPushReminders";
 import { logger } from "../lib/logger";
 import { createFirebaseImageUrl, deleteFirebaseObject, uploadFirebaseImage } from "../lib/firebaseStorage";
 
@@ -228,7 +230,9 @@ export async function deliverDuePhotoReminders() {
         .where(eq(participantsTable.experienceId, experience.id));
       const userIds = members.map((member) => member.userId);
       const tokens = userIds.length ? await db.select({ token: pushTokensTable.token }).from(pushTokensTable)
-        .where(inArray(pushTokensTable.userId, userIds)) : [];
+        .where(and(inArray(pushTokensTable.userId, userIds), inArray(pushTokensTable.platform, ["ios", "android"]))) : [];
+      const webSubscriptions = await webRecipients(userIds, now);
+      tokens.push(...webSubscriptions.map((row) => ({ token: webPushToken(row.id) })));
       if (!tokens.length) continue;
 
       await db.insert(reminderDeliveriesTable).values(tokens.map(({ token }) => ({
@@ -248,12 +252,13 @@ export async function deliverDuePhotoReminders() {
           eq(reminderDeliveriesTable.status, "pending"),
           inArray(reminderDeliveriesTable.token, tokens.map(({ token }) => token)),
         )).returning();
+      const expoDeliveries = pendingDeliveries.filter((row) => !isWebPushToken(row.token));
       const invalidTokens = new Set<string>();
       let acceptedCount = 0;
       let rejectedCount = 0;
       let transportFailureCount = 0;
-      for (let offset = 0; offset < pendingDeliveries.length; offset += EXPO_PUSH_BATCH_SIZE) {
-        const batchDeliveries = pendingDeliveries.slice(offset, offset + EXPO_PUSH_BATCH_SIZE);
+      for (let offset = 0; offset < expoDeliveries.length; offset += EXPO_PUSH_BATCH_SIZE) {
+        const batchDeliveries = expoDeliveries.slice(offset, offset + EXPO_PUSH_BATCH_SIZE);
         await db.transaction(async (tx) => {
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"pic-sync-experience:" + experience.id}, 0))`);
           const activeCheck = await tx.select({ sessionStatus: experiencesTable.sessionStatus })
@@ -353,6 +358,34 @@ export async function deliverDuePhotoReminders() {
               }
             }
           }
+        });
+      }
+      // Reuse the existing persistent delivery key, lease and completion rules.
+      // Web references never reach Expo's send or receipt endpoints.
+      for (const delivery of pendingDeliveries.filter((row) => isWebPushToken(row.token))) {
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"pic-sync-experience:" + experience.id}, 0))`);
+          const active = await tx.select({ sessionStatus: experiencesTable.sessionStatus }).from(experiencesTable)
+            .where(eq(experiencesTable.id, experience.id)).limit(1);
+          const owned = await tx.select().from(reminderDeliveriesTable).where(and(
+            eq(reminderDeliveriesTable.id, delivery.id), eq(reminderDeliveriesTable.status, "sending"),
+            eq(reminderDeliveriesTable.leaseOwner, leaseOwner),
+          )).limit(1).for("update");
+          if (!owned[0]) return;
+          const recipient = webSubscriptions.find((row) => webPushToken(row.id) === delivery.token);
+          let status = "cancelled";
+          if (active[0]?.sessionStatus === "active" && recipient && await stillEligible(tx, experience.id, recipient)) {
+            status = await sendWebReminder(recipient, reminderPayload({
+              experienceId: experience.id, reminderId: reminder.id, scheduledAt: reminder.scheduledAt,
+              title: reminder.title, organizerName, messageVariant: messageVariantForReminder(reminder.id),
+            }));
+            if (status === "invalid") await removeWebRecipient(tx, recipient);
+          }
+          await tx.update(reminderDeliveriesTable).set({
+            status, leaseUntil: null, leaseOwner: null, attempts: delivery.attempts + 1,
+            lastError: status === "pending" ? "Web push configuration or provider unavailable" : null,
+            updatedAt: new Date(),
+          }).where(and(eq(reminderDeliveriesTable.id, delivery.id), eq(reminderDeliveriesTable.leaseOwner, leaseOwner)));
         });
       }
       if (invalidTokens.size) {
@@ -599,7 +632,7 @@ router.post("/:experienceId/push-token", async (req, res) => {
   if (!userId) return;
   if (!await canAccess(req.params.experienceId, userId)) return res.status(403).json({ error: "Forbidden" });
   const body = z.object({
-    token: z.string().min(10).max(300),
+    token: z.string().min(10).max(300).refine((token) => !isWebPushToken(token)),
     platform: z.enum(["ios", "android"]),
   }).parse(req.body);
   await db.insert(pushTokensTable).values({
@@ -635,7 +668,7 @@ router.post("/:experienceId/test-push", async (req, res) => {
   const memberIds = [...new Set(members.map(({ userId: memberId }) => memberId))];
   const tokenRows = memberIds.length
     ? await db.select({ token: pushTokensTable.token }).from(pushTokensTable)
-      .where(inArray(pushTokensTable.userId, memberIds))
+      .where(and(inArray(pushTokensTable.userId, memberIds), inArray(pushTokensTable.platform, ["ios", "android"])))
     : [];
   const tokens = [...new Set(tokenRows.map(({ token }) => token))];
   if (!tokens.length) {

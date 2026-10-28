@@ -2,17 +2,20 @@ import { Router, type Response } from "express";
 import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import * as webpush from "web-push";
-import { db, webPushTestSubscriptionsTable } from "@workspace/db";
+import { db, webPushTestSubscriptionsTable, pushTokensTable, participantsTable } from "@workspace/db";
 import { z } from "zod";
 import { logger } from "../lib/logger";
 import {
   bearerCredential,
+  webPushToken,
   createDeviceCredential,
   hashDeviceCredential,
   isAllowedWebPushEndpoint,
   sendAuthorizedDeviceTest,
   type DevicePushSubscription,
 } from "../lib/devicePush";
+
+import { configureVapid } from "../lib/webPushConfig";
 
 const router = Router();
 const TEST_COOLDOWN_MS = 30_000;
@@ -30,18 +33,6 @@ function respondError(res: Response, status: number, code: string, correlationId
   return res.status(status).json({ error: code, correlationId });
 }
 
-function configureVapid() {
-  const publicKey = process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim();
-  const privateKey = process.env.WEB_PUSH_VAPID_PRIVATE_KEY?.trim();
-  const subject = process.env.WEB_PUSH_VAPID_SUBJECT?.trim();
-  if (!publicKey || !privateKey || !subject) return null;
-  try {
-    webpush.setVapidDetails(subject, publicKey, privateKey);
-    return publicKey;
-  } catch {
-    return null;
-  }
-}
 
 function safeFailure(correlationId: string, event: string, error: unknown) {
   const errorName = error instanceof Error ? error.name : "UnknownError";
@@ -117,14 +108,45 @@ router.post("/subscriptions", async (req, res) => {
   return res.status(201).json({ registered: true, deviceCredential, correlationId });
 });
 
+// A device capability proves ownership of this subscription. Guest identity and
+// membership follow the same identity model as the existing native registration.
+router.post("/subscriptions/reminders", async (req, res) => {
+  const correlationId = randomUUID();
+  res.setHeader("x-correlation-id", correlationId);
+  const credential = bearerCredential(req.header("authorization"));
+  if (!credential) return respondError(res, 401, "DEVICE_CREDENTIAL_REQUIRED", correlationId);
+  const userId = req.header("x-pic-sync-guest-id")?.trim().slice(0, 80);
+  const parsed = z.object({ experienceId: z.string().trim().min(1).max(200) }).strict().safeParse(req.body);
+  if (!userId || !parsed.success) return respondError(res, 400, "INVALID_REMINDER_REGISTRATION", correlationId);
+  const owned = await db.select({ id: webPushTestSubscriptionsTable.id }).from(webPushTestSubscriptionsTable)
+    .where(eq(webPushTestSubscriptionsTable.credentialHash, hashDeviceCredential(credential))).limit(1);
+  if (!owned[0]) return respondError(res, 401, "DEVICE_CREDENTIAL_INVALID", correlationId);
+  const member = await db.select({ id: participantsTable.id }).from(participantsTable)
+    .where(and(eq(participantsTable.experienceId, parsed.data.experienceId), eq(participantsTable.userId, userId))).limit(1);
+  if (!member[0]) return respondError(res, 403, "SESSION_MEMBERSHIP_REQUIRED", correlationId);
+  await db.insert(pushTokensTable).values({
+    id: randomUUID(), userId, token: webPushToken(owned[0].id), platform: "web", updatedAt: new Date(),
+  }).onConflictDoUpdate({ target: pushTokensTable.token, set: { userId, platform: "web", updatedAt: new Date() } });
+  return res.status(204).send();
+});
+
+async function revokeRegistration(credentialHash: string) {
+  await db.transaction(async (tx) => {
+    const owned = await tx.select({ id: webPushTestSubscriptionsTable.id }).from(webPushTestSubscriptionsTable)
+      .where(eq(webPushTestSubscriptionsTable.credentialHash, credentialHash)).limit(1);
+    if (!owned[0]) return;
+    await tx.delete(pushTokensTable).where(eq(pushTokensTable.token, webPushToken(owned[0].id)));
+    await tx.delete(webPushTestSubscriptionsTable).where(eq(webPushTestSubscriptionsTable.id, owned[0].id));
+  });
+}
+
 router.delete("/subscriptions", async (req, res) => {
   const correlationId = randomUUID();
   res.setHeader("x-correlation-id", correlationId);
   const credential = bearerCredential(req.header("authorization"));
   if (!credential) return respondError(res, 401, "DEVICE_CREDENTIAL_REQUIRED", correlationId);
   try {
-    await db.delete(webPushTestSubscriptionsTable)
-      .where(eq(webPushTestSubscriptionsTable.credentialHash, hashDeviceCredential(credential)));
+    await revokeRegistration(hashDeviceCredential(credential));
     logger.info({ correlationId, statusCode: 204, operation: "subscription-revoked" }, "Web Push device subscription revoked");
     return res.status(204).send();
   } catch (error) {
@@ -179,8 +201,7 @@ router.post("/subscriptions/test", async (req, res) => {
       ? (error as { statusCode?: unknown }).statusCode
       : undefined;
     if (statusCode === 404 || statusCode === 410) {
-      await db.delete(webPushTestSubscriptionsTable)
-        .where(eq(webPushTestSubscriptionsTable.credentialHash, hash)).catch(() => undefined);
+      await revokeRegistration(hash).catch(() => undefined);
       logger.warn({ correlationId, statusCode, endpointInvalid: true }, "Web Push provider rejected an expired device subscription");
       return respondError(res, 410, "SUBSCRIPTION_EXPIRED", correlationId);
     }

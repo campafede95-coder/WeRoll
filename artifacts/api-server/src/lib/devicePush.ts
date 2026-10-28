@@ -52,3 +52,8 @@ export async function sendAuthorizedDeviceTest<T>(input: {
   }
   return { authorized: true as const, result: await input.send() };
 }
+
+// Internal routing reference only: never an Expo token or a bearer credential.
+export const WEB_PUSH_TOKEN_PREFIX = "webpush:";
+export function webPushToken(subscriptionId: string) { return `${WEB_PUSH_TOKEN_PREFIX}${subscriptionId}`; }
+export function isWebPushToken(token: string) { return token.startsWith(WEB_PUSH_TOKEN_PREFIX); }

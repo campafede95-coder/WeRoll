@@ -16,7 +16,10 @@ const columns = Object.fromEntries(
     .map((name) => [name, { key: name }]),
 );
 const webPushTestSubscriptionsTable = columns;
-const state = { rows: [], sends: [], providerError: null };
+const pushTokensTable = { token: { key: 'token' }, userId: { key: 'userId' }, platform: { key: 'platform' } };
+const participantsTable = { id: { key: 'id' }, userId: { key: 'userId' }, experienceId: { key: 'experienceId' } };
+const state = { rows: [], bindings: [], members: [], sends: [], providerError: null };
+function rowsFor(table) { return table === pushTokensTable ? state.bindings : table === participantsTable ? state.members : state.rows; }
 
 function matches(row, condition) {
   if (!condition) return true;
@@ -30,27 +33,34 @@ function matches(row, condition) {
 }
 
 const db = {
+  transaction: async (run) => run(db),
   select() {
-    return { from: () => ({ where: (condition) => ({ limit: async (limit) => state.rows.filter((row) => matches(row, condition)).slice(0, limit) }) }) };
+    return { from: (table) => ({ where: (condition) => ({ limit: async (limit) => rowsFor(table).filter((row) => matches(row, condition)).slice(0, limit) }) }) };
   },
-  insert() {
-    return { values: async (row) => { state.rows.push({ ...row }); } };
+  insert(table) {
+    return { values: (row) => ({
+      then: (resolve, reject) => Promise.resolve().then(() => { rowsFor(table).push({ ...row }); }).then(resolve, reject),
+      onConflictDoUpdate: async ({ set }) => {
+        const existing = rowsFor(table).find((item) => item.token === row.token);
+        if (existing) Object.assign(existing, set); else rowsFor(table).push({ ...row });
+      },
+    }) };
   },
-  update() {
-    return { set: (values) => ({ where: (condition) => ({ returning: async () => {
-      const selected = state.rows.filter((row) => matches(row, condition));
-      for (const row of selected) Object.assign(row, values);
-      return selected;
-    } }) }) };
+  update(table) {
+    return { set: (values) => ({ where: (condition) => {
+      const apply = () => { const selected = rowsFor(table).filter((row) => matches(row, condition)); for (const row of selected) Object.assign(row, values); return selected; };
+      return { returning: async () => apply(), then: (resolve, reject) => Promise.resolve().then(apply).then(resolve, reject) };
+    } }) };
   },
-  delete() {
+  delete(table) {
     return { where: async (condition) => {
-      state.rows = state.rows.filter((row) => !matches(row, condition));
+      const rows = rowsFor(table);
+      for (let i = rows.length - 1; i >= 0; i--) if (matches(rows[i], condition)) rows.splice(i, 1);
     } };
   },
 };
 
-mock.module('@workspace/db', { exports: { db, webPushTestSubscriptionsTable } });
+mock.module('@workspace/db', { exports: { db, webPushTestSubscriptionsTable, pushTokensTable, participantsTable } });
 mock.module('drizzle-orm', { exports: {
   eq: (column, value) => ({ op: 'eq', column, value }),
   isNull: (column) => ({ op: 'isNull', column }),
@@ -82,6 +92,8 @@ after(() => {
 
 beforeEach(() => {
   state.rows = [];
+  state.bindings = [];
+  state.members = [];
   state.sends = [];
   state.providerError = null;
 });
@@ -184,4 +196,31 @@ test('device credential revokes only its registration', async () => {
   assert.equal(response.statusCode, 204);
   assert.equal(state.rows.length, 1);
   assert.equal(state.rows[0].credentialHash, createHash('sha256').update(second.body.deviceCredential).digest('hex'));
+});
+
+test('reminder binding requires device ownership and session membership, and does not duplicate the device', async () => {
+  const { body } = await register();
+  const headers = { authorization: `Bearer ${body.deviceCredential}`, 'x-pic-sync-guest-id': 'member-a' };
+  const input = { headers, body: { experienceId: 'session-a' } };
+  assert.equal((await invoke('post', '/subscriptions/reminders', input)).statusCode, 403);
+  state.members.push({ id: 'membership', userId: 'member-a', experienceId: 'session-a' });
+  assert.equal((await invoke('post', '/subscriptions/reminders', { ...input, headers: { ...headers, authorization: `Bearer ${'z'.repeat(43)}` } })).statusCode, 401);
+  assert.equal(state.bindings.length, 0);
+  assert.equal((await invoke('post', '/subscriptions/reminders', input)).statusCode, 204);
+  assert.equal((await invoke('post', '/subscriptions/reminders', input)).statusCode, 204);
+  assert.equal(state.bindings.length, 1);
+  assert.equal(state.bindings[0].userId, 'member-a');
+  assert.equal(state.bindings[0].platform, 'web');
+  assert.equal(state.bindings[0].token, `webpush:${state.rows[0].id}`);
+  await invoke('delete', '/subscriptions', { headers });
+  assert.equal(state.bindings.length, 0);
+  assert.equal(state.rows.length, 0);
+});
+
+test('manual test cooldown prevents a second provider send', async () => {
+  const { body } = await register();
+  const input = { headers: { authorization: `Bearer ${body.deviceCredential}` } };
+  assert.equal((await invoke('post', '/subscriptions/test', input)).statusCode, 202);
+  assert.equal((await invoke('post', '/subscriptions/test', input)).statusCode, 429);
+  assert.equal(state.sends.length, 1);
 });
