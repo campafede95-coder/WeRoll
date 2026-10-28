@@ -1,5 +1,5 @@
 import { createInsertSchema } from "drizzle-zod";
-import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod/v4";
 
 export const usersTable = pgTable("pic_sync_users", {
@@ -51,6 +51,24 @@ export const pushTokensTable = pgTable("pic_sync_push_tokens", {
   platform: text("platform").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Standalone, device-scoped Web Push registrations used by the manual test flow.
+// This intentionally has no guest or experience relationship: a test can only
+// target the subscription authenticated by its one-time-issued capability.
+export const webPushTestSubscriptionsTable = pgTable("pic_sync_web_push_test_subscriptions", {
+  id: text("id").primaryKey(),
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  expirationTime: bigint("expiration_time", { mode: "number" }),
+  credentialHash: text("credential_hash").notNull(),
+  lastTestAt: timestamp("last_test_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("pic_sync_web_push_test_subscriptions_endpoint_uq").on(table.endpoint),
+  uniqueIndex("pic_sync_web_push_test_subscriptions_credential_hash_uq").on(table.credentialHash),
+]);
 
 export const reminderDeliveriesTable = pgTable("pic_sync_reminder_deliveries", {
   id: text("id").primaryKey(),

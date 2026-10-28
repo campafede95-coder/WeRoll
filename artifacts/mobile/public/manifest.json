@@ -1,0 +1,19 @@
+{
+  "name": "WeRoll",
+  "short_name": "WeRoll",
+  "description": "Album condiviso per avventure",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "lang": "it",
+  "theme_color": "#f8f3ea",
+  "background_color": "#f8f3ea",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

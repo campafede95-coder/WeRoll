@@ -17,6 +17,7 @@ import { LAST_EXPERIENCE_ID_STORAGE_KEY, rememberClosedExperience, resolveExperi
 import { clearExperienceNotifications, ensurePhotoReminderChannel } from '@/constants/notifications';
 import { waitForPendingUploads } from '@/constants/pendingUploads';
 import { pickerOffsetForIndex } from '@/constants/timePicker';
+import { WebPushControls } from '@/components/WebPushControls';
 
 const PHOTO_WINDOW_MS = 15 * 60 * 1000;
 
@@ -423,21 +424,25 @@ export default function GroupSessionScreen() {
             </Pressable>
           ) : null}
           <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Pronti a ricordare?</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Ad ogni notifica hai 15 minuti per catturare il tuo ricordo.{'\n\n'}Ma niente pressione se non riesci: goditi il momento e scatta quando vuoi!</Text>
-          <Surface style={styles.testPushCard}>
-            <View style={styles.testPushCopy}>
-              <Text style={[styles.personName, { color: colors.foreground }]}>Test notifiche</Text>
-              <Text style={[styles.personRole, { color: colors.mutedForeground }]}>Invia una push a questo telefono per verificare permessi, suono e canale.</Text>
-            </View>
-            <PrimaryButton label="Invia test" icon="bell" variant="soft" onPress={sendTestNotification} loading={testPush.isPending} />
-            {testPushStatus ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={[styles.testPushStatus, { color: testPushStatus.tone === 'success' ? colors.primary : colors.destructive }]}
-              >
-                {testPushStatus.message}
-              </Text>
-            ) : null}
-          </Surface>
+          {Platform.OS === 'web' ? (
+            <WebPushControls />
+          ) : (
+            <Surface style={styles.testPushCard}>
+              <View style={styles.testPushCopy}>
+                <Text style={[styles.personName, { color: colors.foreground }]}>Test notifiche</Text>
+                <Text style={[styles.personRole, { color: colors.mutedForeground }]}>Invia una push a questo telefono per verificare permessi, suono e canale.</Text>
+              </View>
+              <PrimaryButton label="Invia test" icon="bell" variant="soft" onPress={sendTestNotification} loading={testPush.isPending} />
+              {testPushStatus ? (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={[styles.testPushStatus, { color: testPushStatus.tone === 'success' ? colors.primary : colors.destructive }]}
+                >
+                  {testPushStatus.message}
+                </Text>
+              ) : null}
+            </Surface>
+          )}
           <PrimaryButton
             label="Scatto libero"
             icon="camera"
